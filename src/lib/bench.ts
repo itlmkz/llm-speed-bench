@@ -3,9 +3,8 @@ import { redactHeaders, type LogEntry } from './log'
 import {
   authHeaders,
   chatEndpointUrl,
-  detectProvider,
   normalizeBaseUrl,
-  type ProviderType,
+  resolveProvider,
 } from './providers'
 
 function estimateTokens(text: string): number {
@@ -420,14 +419,6 @@ async function streamAnthropic(args: {
 /* Public entry                                                        */
 /* ------------------------------------------------------------------ */
 
-function resolveProvider(endpoint: EndpointConfig): ProviderType {
-  const byUrl = detectProvider(endpoint.baseUrl)
-  if (byUrl !== 'unknown') return byUrl
-  // Secondary signal: sk-ant- key prefix implies Anthropic even on proxies.
-  if (/^sk-ant-/i.test(endpoint.apiKey.trim())) return 'anthropic'
-  return 'openai'
-}
-
 /**
  * Runs one streaming chat completion against an OpenAI-compatible OR
  * Anthropic native endpoint and measures TTFT, total latency, and tokens/sec.
@@ -437,7 +428,11 @@ export async function runStreamBench(
   input: StreamBenchInput,
 ): Promise<StreamBenchOutput> {
   const { endpoint, slug, preset, signal } = input
-  const provider = resolveProvider(endpoint)
+  const provider = resolveProvider(
+    endpoint.baseUrl,
+    endpoint.apiKey,
+    endpoint.provider,
+  )
   const baseUrl = normalizeBaseUrl(endpoint.baseUrl)
   const url = chatEndpointUrl(baseUrl, provider)
 
