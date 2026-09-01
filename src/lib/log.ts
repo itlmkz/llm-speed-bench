@@ -1,56 +1,26 @@
-export type LogEntry = {
-  id: string
-  ts: string
-  level: 'info' | 'error'
-  label: string
-  scenario: string
-  endpointLabel: string
-  baseUrl: string
-  slug: string
-  request: {
-    method: string
-    url: string
-    headers: Record<string, string>
-    body: unknown
-  }
-  response?: {
-    status: number
-    statusText: string
-    headers: Record<string, string>
-    body: string
-  }
-  timing?: {
-    ttftMs: number | null
-    totalMs: number
-  }
-  error?: string
-}
+import {
+  redactHeaders,
+  sanitizeLogEntry,
+  redactSecretsInString,
+  redactUrl,
+  type SanitizedLogEntry,
+} from './sanitize'
 
-export function redactHeaders(
-  headers: Record<string, string>,
-): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(headers)) {
-    if (/authorization/i.test(key)) {
-      const v = String(value)
-      const token = v.replace(/^Bearer\s+/i, '')
-      out[key] = `Bearer ${token.slice(0, 6)}…${token.slice(-4)} (redacted, ${token.length} chars)`
-    } else {
-      out[key] = value
-    }
-  }
-  return out
-}
+export type LogEntry = SanitizedLogEntry
+
+export { redactHeaders, redactSecretsInString, redactUrl, sanitizeLogEntry }
 
 export function downloadLogs(entries: LogEntry[]): void {
+  const safe = entries.map(sanitizeLogEntry)
   const lines: string[] = []
   lines.push('LLM Speed Test — request log')
   lines.push(`Generated: ${new Date().toISOString()}`)
-  lines.push(`Entries: ${entries.length}`)
+  lines.push(`Entries: ${safe.length}`)
+  lines.push('Keys and authorization headers are stripped. Never paste a raw key into an issue.')
   lines.push('='.repeat(72))
   lines.push('')
 
-  for (const entry of entries) {
+  for (const entry of safe) {
     lines.push(`[${entry.ts}] ${entry.level.toUpperCase()} — ${entry.label}`)
     lines.push(`  Scenario:   ${entry.scenario}`)
     lines.push(`  Endpoint:   ${entry.endpointLabel}`)
@@ -105,7 +75,7 @@ export function downloadLogs(entries: LogEntry[]): void {
   lines.push('='.repeat(72))
   lines.push('RAW JSON (handy when sharing this log):')
   lines.push('='.repeat(72))
-  lines.push(JSON.stringify(entries, null, 2))
+  lines.push(JSON.stringify(safe, null, 2))
 
   const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
