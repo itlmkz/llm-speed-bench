@@ -219,6 +219,7 @@ export default function App() {
   // been fetched yet (debounced). Keeps the experience smooth without spamming.
   useEffect(() => {
     if (!hydrated) return
+    const timers = fetchTimers.current
     for (const endpoint of config.endpoints) {
       const hasKey = endpoint.apiKey.trim().length > 0
       const validation = validateBaseUrl(endpoint.baseUrl)
@@ -228,14 +229,14 @@ export default function App() {
         !validation.suspect &&
         (!state || state.status === 'idle')
       if (shouldFetch) {
-        clearTimeout(fetchTimers.current[endpoint.id])
-        fetchTimers.current[endpoint.id] = setTimeout(() => {
+        clearTimeout(timers[endpoint.id])
+        timers[endpoint.id] = setTimeout(() => {
           void fetchModelsFor(endpoint.id)
         }, 900)
       }
     }
     return () => {
-      for (const t of Object.values(fetchTimers.current)) clearTimeout(t)
+      for (const t of Object.values(timers)) clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, config.endpoints, config.endpoints.length])
@@ -407,17 +408,17 @@ export default function App() {
           <Alert status="accent">
             <Alert.Indicator />
             <Alert.Content>
-              <Alert.Title>Your API keys never leave your browser</Alert.Title>
+              <Alert.Title>Your API keys stay in your browser</Alert.Title>
               <Alert.Description>
                 Your keys live only in this browser&apos;s{' '}
                 <strong>localStorage</strong> (key:{' '}
                 <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
                   {BRAND.localStorageKey}
                 </code>
-                ). Nothing is sent to Netlify or any backend. When you run a
-                bench, your browser calls the provider directly. Export JSON
-                leaves the keys out. Clear site data or switch browsers and
-                they&apos;re gone.
+                ). Netlify and our backend never see them. When you run a
+                benchmark, your browser calls the provider directly. Export
+                JSON leaves the keys out. Clear site data or switch browsers
+                and they&apos;re gone.
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -428,17 +429,17 @@ export default function App() {
           <Alert status="accent">
             <Alert.Indicator />
             <Alert.Content>
-              <Alert.Title>Your API keys never leave your browser</Alert.Title>
+              <Alert.Title>Your API keys stay in your browser</Alert.Title>
               <Alert.Description>
                 Your keys live only in this browser&apos;s{' '}
                 <strong>localStorage</strong> (key:{' '}
                 <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
                   {BRAND.localStorageKey}
                 </code>
-                ). Nothing is sent to Netlify or any backend. When you run a
-                bench, your browser calls the provider directly. Export JSON
-                leaves the keys out. Clear site data or switch browsers and
-                they&apos;re gone.
+                ). Netlify and our backend never see them. When you run a
+                benchmark, your browser calls the provider directly. Export
+                JSON leaves the keys out. Clear site data or switch browsers
+                and they&apos;re gone.
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -447,9 +448,9 @@ export default function App() {
         <Card.Header>
           <Card.Title>Endpoints</Card.Title>
           <Card.Description>
-            OpenRouter, xAI, OpenAI, Anthropic, Groq, Ollama, or any
-            OpenAI-compatible URL. We detect the provider type for you. Paste
-            your key below; it stays in your browser.
+            Add OpenRouter, xAI, OpenAI, Anthropic, Groq, Ollama, or any
+            OpenAI-compatible URL. We&apos;ll detect the provider for you.
+            Paste your key below; it stays in your browser.
           </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
@@ -536,9 +537,8 @@ export default function App() {
                       spellCheck={false}
                     />
                     <Description>
-                      If the browser blocks the stream (CORS), put your proxy
-                      URL here and we&apos;ll route through it. Leave it empty
-                      otherwise.
+                      Seeing a CORS error? Put your proxy URL here and we&apos;ll
+                      route through it. Leave it empty otherwise.
                     </Description>
                   </TextField>
                 </div>
@@ -582,7 +582,7 @@ export default function App() {
                   {fetchStatus === 'ok' ? (
                     <span className="text-xs text-muted">
                       ✓ {ms?.models.length ?? 0} model
-                      {ms?.models.length === 1 ? '' : 's'} found
+                      {ms?.models.length === 1 ? '' : 's'} ready
                     </span>
                   ) : null}
                   {fetchStatus === 'error' ? (
@@ -594,7 +594,7 @@ export default function App() {
                   endpoint.apiKey.trim() &&
                   !validation.suspect ? (
                     <span className="text-xs text-muted">
-                      Auto-fetching models…
+                      Looking for models…
                     </span>
                   ) : null}
                 </div>
@@ -605,7 +605,7 @@ export default function App() {
         <Card.Footer className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-foreground">
-              Add provider from list
+              Add a provider
             </span>
             <select
               aria-label="Add provider from list"
@@ -618,7 +618,7 @@ export default function App() {
               className="max-w-xs rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
             >
               <option value="" disabled>
-                Pick a known provider…
+                Choose a provider…
               </option>
               {PROVIDER_PRESETS.map((preset) => (
                 <option key={preset.id} value={preset.id}>
@@ -645,8 +645,8 @@ export default function App() {
         <Card.Header>
           <Card.Title>Model slugs</Card.Title>
           <Card.Description>
-            Pair each slug with an endpoint. Run as many models as you want in
-            one pass.
+            Tell us which endpoint each model uses. Run as many models as you
+            like in one pass.
           </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
@@ -884,14 +884,14 @@ export default function App() {
               isDisabled={!logs.length}
               onPress={() => downloadLogs(logs)}
             >
-              Download log
+              Download the log
             </Button>
             <Button
               variant="secondary"
               isDisabled={!results.length}
               onPress={exportJson}
             >
-              Export JSON
+              Export results
             </Button>
           </div>
         </Card.Header>
