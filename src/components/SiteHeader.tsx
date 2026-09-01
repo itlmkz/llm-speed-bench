@@ -61,8 +61,8 @@ export function SiteHeader({
         {BRAND.siteTagline}
       </h1>
       <p className="max-w-2xl text-base text-muted">
-        Add base URLs, attach model slugs, pick scenarios, then run. Compare
-        providers with your own keys — static hosting only, no backend.
+        Add your endpoints, pick the models, hit run. Your keys, your browser,
+        no backend.
       </p>
     </header>
   )

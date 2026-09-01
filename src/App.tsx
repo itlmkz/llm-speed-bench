@@ -409,15 +409,15 @@ export default function App() {
             <Alert.Content>
               <Alert.Title>Your API keys never leave your browser</Alert.Title>
               <Alert.Description>
-                Keys are saved only in this device&apos;s{' '}
+                Your keys live only in this browser&apos;s{' '}
                 <strong>localStorage</strong> (key:{' '}
                 <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
                   {BRAND.localStorageKey}
                 </code>
-                ). They are not sent to Netlify or any backend. When you run a
-                benchmark, your browser calls the provider directly. Export JSON
-                omits keys. Clearing site data or using another browser removes
-                them.
+                ). Nothing is sent to Netlify or any backend. When you run a
+                bench, your browser calls the provider directly. Export JSON
+                leaves the keys out. Clear site data or switch browsers and
+                they&apos;re gone.
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -430,15 +430,15 @@ export default function App() {
             <Alert.Content>
               <Alert.Title>Your API keys never leave your browser</Alert.Title>
               <Alert.Description>
-                Keys are saved only in this device&apos;s{' '}
+                Your keys live only in this browser&apos;s{' '}
                 <strong>localStorage</strong> (key:{' '}
                 <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
                   {BRAND.localStorageKey}
                 </code>
-                ). They are not sent to Netlify or any backend. When you run a
-                benchmark, your browser calls the provider directly. Export JSON
-                omits keys. Clearing site data or using another browser removes
-                them.
+                ). Nothing is sent to Netlify or any backend. When you run a
+                bench, your browser calls the provider directly. Export JSON
+                leaves the keys out. Clear site data or switch browsers and
+                they&apos;re gone.
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -447,10 +447,9 @@ export default function App() {
         <Card.Header>
           <Card.Title>Endpoints</Card.Title>
           <Card.Description>
-            OpenRouter, xAI/Grok, OpenAI, Anthropic, Groq, Ollama, or any
-            OpenAI-compatible base URL. Provider type is detected
-            automatically. Paste each provider&apos;s API key below — it stays
-            in your browser only.
+            OpenRouter, xAI, OpenAI, Anthropic, Groq, Ollama, or any
+            OpenAI-compatible URL. We detect the provider type for you. Paste
+            your key below; it stays in your browser.
           </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
@@ -509,8 +508,8 @@ export default function App() {
                     <Label>API key</Label>
                     <Input placeholder="sk-… / sk-ant-…" autoComplete="off" />
                     <Description>
-                      Stored locally in this browser (localStorage), not on
-                      our servers.
+                      Stays in this browser&apos;s localStorage, never on a
+                      server.
                     </Description>
                   </TextField>
                   <Button
@@ -537,8 +536,9 @@ export default function App() {
                       spellCheck={false}
                     />
                     <Description>
-                      If the browser blocks the stream (CORS), prefix requests
-                      through your own proxy. Leave empty otherwise.
+                      If the browser blocks the stream (CORS), put your proxy
+                      URL here and we&apos;ll route through it. Leave it empty
+                      otherwise.
                     </Description>
                   </TextField>
                 </div>
@@ -582,7 +582,7 @@ export default function App() {
                   {fetchStatus === 'ok' ? (
                     <span className="text-xs text-muted">
                       ✓ {ms?.models.length ?? 0} model
-                      {ms?.models.length === 1 ? '' : 's'} available
+                      {ms?.models.length === 1 ? '' : 's'} found
                     </span>
                   ) : null}
                   {fetchStatus === 'error' ? (
@@ -645,7 +645,8 @@ export default function App() {
         <Card.Header>
           <Card.Title>Model slugs</Card.Title>
           <Card.Description>
-            Pair each slug with an endpoint. Run several models in one pass.
+            Pair each slug with an endpoint. Run as many models as you want in
+            one pass.
           </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
@@ -698,7 +699,7 @@ export default function App() {
                   {(() => {
                     const fetched = modelState[model.endpointId]?.models ?? []
                     if (fetched.length) {
-                      return `Pick from ${fetched.length} fetched models, or type a slug.`
+                      return `Pick from ${fetched.length} fetched models, or type your own.`
                     }
                     return 'Type a slug, or fetch models for the endpoint above.'
                   })()}
@@ -747,8 +748,8 @@ export default function App() {
         <Card.Header>
           <Card.Title>Test scenarios</Card.Title>
           <Card.Description>
-            Fixed prompts so latency and tokens/sec stay comparable across
-            models.
+            Same prompts every run, so the numbers are actually comparable
+            across models.
           </Card.Description>
         </Card.Header>
         <Card.Content>
@@ -788,8 +789,8 @@ export default function App() {
         </Card.Content>
         <Card.Footer className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted">
-            Metrics: TTFT, total time, decode tok/s, overall tok/s. Runs
-            sequentially.
+            We measure TTFT, total time, decode tok/s, and overall tok/s.
+            Runs one after another.
           </p>
           <div className="flex gap-2">
             {running ? (
@@ -869,7 +870,7 @@ export default function App() {
           <div>
             <Card.Title>Results</Card.Title>
             <Card.Description>
-              Per-run TTFT, total latency, and tokens/sec.
+              TTFT, total time, and tokens/sec for every run.
             </Card.Description>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -900,8 +901,8 @@ export default function App() {
               <EmptyState.Header>
                 <EmptyState.Title>No runs yet</EmptyState.Title>
                 <EmptyState.Description>
-                  Configure endpoints and slugs, pick scenarios, then click Run
-                  benchmark.
+                  Set up your endpoints and slugs, pick a scenario, then hit
+                  Run benchmark.
                 </EmptyState.Description>
               </EmptyState.Header>
             </EmptyState>
@@ -983,13 +984,14 @@ export default function App() {
           </a>
         </p>
         <p>
-          <strong className="text-foreground">Privacy:</strong> API keys and
-          config live in your browser&apos;s localStorage only. Static hosting
-          only — we never receive or store your keys.
+          <strong className="text-foreground">Privacy:</strong> your keys
+          and config live only in your browser&apos;s localStorage. This is a
+          static site — we never see or store your keys.
         </p>
         <p>
-          Benchmark requests go from your browser to each provider. CORS must
-          allow browser calls.
+          Requests go straight from your browser to each provider. If a
+          provider blocks browser calls (CORS), add a proxy URL on that
+          endpoint.
         </p>
       </footer>
         </>

@@ -7,7 +7,7 @@ export function AboutSection() {
       <Card.Header>
         <Card.Title>{ABOUT.headline}</Card.Title>
         <Card.Description>
-          Why {BRAND.siteName} exists — from {BRAND.author} at {BRAND.studio}
+          Why {BRAND.siteName} exists, in {BRAND.author}&apos;s words
         </Card.Description>
       </Card.Header>
       <Card.Content className="flex max-w-3xl flex-col gap-4 text-base leading-relaxed text-muted">

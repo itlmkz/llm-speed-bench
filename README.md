@@ -13,11 +13,11 @@ API keys stay in your browser only — see [Privacy & API keys](#privacy--api-ke
 
 ## About
 
-Every week a provider publishes a new “fastest model” headline — tokens per second on a synthetic benchmark, latency on a toy prompt, numbers that rarely match production.
+Every week someone announces the “fastest model yet.” Tokens per second on a benchmark nobody actually runs, latency on a prompt nobody uses. The numbers almost never match what you see when you ship.
 
-I built this because I was tired of the gap between those claims and reality. When you pick a model and a provider, you deserve to know how fast it actually streams with **your** API key, **your** region, and **your** workload.
+I got tired of guessing. So I built this: paste your key, point it at any OpenAI-compatible or Anthropic endpoint, and watch the real stream — time to first token, total time, tokens per second. Your numbers, your region, your workload.
 
-LLM Speed Test runs fixed scenarios (debug triage, document analysis, coding) and reports TTFT, total latency, and decode tokens per second from real streaming responses. Export JSON and share when someone asks “how fast is it, really?”
+LLM Speed Test runs three fixed scenarios (a bug triage, a doc summary, a small coding task) so you can compare models fairly. Keys stay in your browser and requests go straight to the provider. Export the JSON and send it to whoever asked “but how fast is it, really?”
 
 — **Manuel Milliery**, Milliery
 

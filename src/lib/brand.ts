@@ -1,6 +1,6 @@
 export const BRAND = {
   siteName: 'LLM Speed Test',
-  siteTagline: 'Measure real streaming speed — not marketing claims',
+  siteTagline: 'How fast does it really stream? Don’t trust the headline — measure it.',
   author: 'Manuel Milliery',
   studio: 'Milliery',
   siteUrl: 'https://llm-speed-test.milliery.com',
@@ -11,10 +11,10 @@ export const BRAND = {
 export const ABOUT = {
   headline: 'About this project',
   paragraphs: [
-    'Every week a provider publishes a new “fastest model” headline — tokens per second on a cherry-picked benchmark, latency on a synthetic prompt, numbers that rarely match what you see in production.',
-    'I built LLM Speed Test because I was tired of the gap between those claims and reality. When you pick a model and a provider, you deserve to know how fast it actually streams with your API key, your region, and your workload — not a slide deck.',
-    'This tool runs fixed scenarios (debug triage, document analysis, coding) against any OpenAI-compatible endpoint you configure. It measures time-to-first-token, total latency, and decode tokens per second from a real streaming response. Your keys stay in your browser; requests go straight to the provider.',
-    'Use it to compare OpenRouter, Groq, OpenAI, xAI, Ollama, or your own gateway side by side — and share the JSON export when someone asks “how fast is it, really?”',
+    'Every week someone announces the “fastest model yet.” Tokens per second on a benchmark nobody actually runs, latency on a prompt nobody uses. The numbers almost never match what you see when you ship.',
+    'I got tired of guessing. So I built this: paste your key, point it at any OpenAI-compatible or Anthropic endpoint, and watch the real stream. Time to first token, total time, tokens per second. Your numbers, your region, your workload.',
+    'It runs three fixed scenarios — a bug triage, a doc summary, a small coding task — so you can compare models fairly. Keys stay in your browser and requests go straight to the provider. Nothing leaves your machine.',
+    'Compare OpenRouter, Groq, OpenAI, xAI, Ollama, or your own gateway side by side. Export the JSON and send it to whoever asked “but how fast is it, really?”',
   ],
   signature: '— Manuel Milliery, Milliery',
 } as const
