@@ -33,7 +33,7 @@ export function defaultConfig(): AppConfig {
       {
         id: uid(),
         endpointId: grokId,
-        slug: 'grok-4-fast-non-reasoning',
+        slug: 'grok-4.3',
       },
     ],
     selectedPresets: ['debug', 'document', 'coding'],

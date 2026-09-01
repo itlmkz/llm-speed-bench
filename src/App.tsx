@@ -34,8 +34,9 @@ import type {
   TestPresetId,
 } from './lib/types'
 import { AboutSection } from './components/AboutSection'
-import { SiteHeader } from './components/SiteHeader'
+import { SiteHeader, type View } from './components/SiteHeader'
 import { BRAND } from './lib/brand'
+import { downloadLogs, type LogEntry } from './lib/log'
 
 function resultKey(presetId: string, modelId: string): string {
   return `${presetId}::${modelId}`
@@ -64,7 +65,13 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(() => defaultConfig())
   const [hydrated, setHydrated] = useState(false)
   const [results, setResults] = useState<BenchResult[]>([])
+  const [logs, setLogs] = useState<LogEntry[]>([])
   const [running, setRunning] = useState(false)
+  const [view, setView] = useState<View>(() =>
+    typeof window !== 'undefined' && window.location.hash === '#about'
+      ? 'about'
+      : 'bench',
+  )
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -76,6 +83,27 @@ export default function App() {
     if (!hydrated) return
     saveConfig(config)
   }, [config, hydrated])
+
+  useEffect(() => {
+    const onHash = () => {
+      setView(window.location.hash === '#about' ? 'about' : 'bench')
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  const switchView = (v: View) => {
+    setView(v)
+    if (typeof window !== 'undefined') {
+      const newHash = v === 'about' ? '#about' : ''
+      if (window.location.hash !== newHash) {
+        const next = newHash
+          ? `${window.location.pathname}${window.location.search}${newHash}`
+          : `${window.location.pathname}${window.location.search}`
+        window.history.replaceState(null, '', next)
+      }
+    }
+  }
 
   const endpointMap = useMemo(() => {
     const map = new Map<string, EndpointConfig>()
@@ -205,6 +233,7 @@ export default function App() {
           preset,
           signal: controller.signal,
         })
+        setLogs((current) => [...current, output.log])
         setResults((current) =>
           current.map((result) =>
             result.key === row.key
@@ -220,6 +249,11 @@ export default function App() {
       } catch (error) {
         if (controller.signal.aborted) break
         const message = error instanceof Error ? error.message : String(error)
+        const logFromError =
+          (error as { logEntry?: LogEntry })?.logEntry
+        if (logFromError) {
+          setLogs((current) => [...current, logFromError])
+        }
         setResults((current) =>
           current.map((result) =>
             result.key === row.key
@@ -266,25 +300,48 @@ export default function App() {
 
   return (
     <div className="page flex flex-col gap-6">
-      <SiteHeader />
+      <SiteHeader view={view} onView={switchView} />
 
-      <Alert status="accent">
-        <Alert.Indicator />
-        <Alert.Content>
-          <Alert.Title>Your API keys never leave your browser</Alert.Title>
-          <Alert.Description>
-            Keys are saved only in this device&apos;s{' '}
-            <strong>localStorage</strong> (key:{' '}
-            <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
-              {BRAND.localStorageKey}
-            </code>
-            ). They are not sent to Netlify or any backend. When you run a
-            benchmark, your browser calls the provider directly. Export JSON
-            omits keys. Clearing site data or using another browser removes
-            them.
-          </Alert.Description>
-        </Alert.Content>
-      </Alert>
+      {view === 'about' ? (
+        <>
+          <Alert status="accent">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Your API keys never leave your browser</Alert.Title>
+              <Alert.Description>
+                Keys are saved only in this device&apos;s{' '}
+                <strong>localStorage</strong> (key:{' '}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
+                  {BRAND.localStorageKey}
+                </code>
+                ). They are not sent to Netlify or any backend. When you run a
+                benchmark, your browser calls the provider directly. Export JSON
+                omits keys. Clearing site data or using another browser removes
+                them.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
+          <AboutSection />
+        </>
+      ) : (
+        <>
+          <Alert status="accent">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Your API keys never leave your browser</Alert.Title>
+              <Alert.Description>
+                Keys are saved only in this device&apos;s{' '}
+                <strong>localStorage</strong> (key:{' '}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
+                  {BRAND.localStorageKey}
+                </code>
+                ). They are not sent to Netlify or any backend. When you run a
+                benchmark, your browser calls the provider directly. Export JSON
+                omits keys. Clearing site data or using another browser removes
+                them.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
 
       <Card>
         <Card.Header>
@@ -574,13 +631,27 @@ export default function App() {
               Per-run TTFT, total latency, and tokens/sec.
             </Card.Description>
           </div>
-          <Button
-            variant="secondary"
-            isDisabled={!results.length}
-            onPress={exportJson}
-          >
-            Export JSON
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {logs.length > 0 ? (
+              <span className="text-xs text-muted">
+                {logs.length} log{logs.length === 1 ? '' : 's'}
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              isDisabled={!logs.length}
+              onPress={() => downloadLogs(logs)}
+            >
+              Download log
+            </Button>
+            <Button
+              variant="secondary"
+              isDisabled={!results.length}
+              onPress={exportJson}
+            >
+              Export JSON
+            </Button>
+          </div>
         </Card.Header>
         <Card.Content>
           {!results.length ? (
@@ -659,8 +730,6 @@ export default function App() {
         </Card.Content>
       </Card>
 
-      <AboutSection />
-
       <footer className="space-y-2 text-sm text-muted">
         <p>
           <strong className="text-foreground">{BRAND.siteName}</strong> by{' '}
@@ -682,6 +751,8 @@ export default function App() {
           allow browser calls.
         </p>
       </footer>
+        </>
+      )}
     </div>
   )
 }

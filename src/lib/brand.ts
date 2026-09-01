@@ -1,7 +1,7 @@
 export const BRAND = {
   siteName: 'LLM Speed Test',
   siteTagline: 'Measure real streaming speed — not marketing claims',
-  author: 'Lulu Cheng',
+  author: 'Manuel Milliery',
   studio: 'Milliery',
   siteUrl: 'https://llm-speed-test.milliery.com',
   githubRepo: 'https://github.com/itlmkz/llm-speed-bench',
@@ -16,5 +16,5 @@ export const ABOUT = {
     'This tool runs fixed scenarios (debug triage, document analysis, coding) against any OpenAI-compatible endpoint you configure. It measures time-to-first-token, total latency, and decode tokens per second from a real streaming response. Your keys stay in your browser; requests go straight to the provider.',
     'Use it to compare OpenRouter, Groq, OpenAI, xAI, Ollama, or your own gateway side by side — and share the JSON export when someone asks “how fast is it, really?”',
   ],
-  signature: '— Lulu Cheng, Milliery',
+  signature: '— Manuel Milliery, Milliery',
 } as const

@@ -1,6 +1,6 @@
 # LLM Speed Test
 
-**By [Lulu Cheng](https://llm-speed-test.milliery.com) · Milliery**
+**By [Manuel Milliery](https://llm-speed-test.milliery.com) · Milliery**
 
 Browser tool to measure **real streaming speed** of OpenAI-compatible LLM APIs — not the cherry-picked numbers on a provider slide deck.
 
@@ -19,7 +19,7 @@ I built this because I was tired of the gap between those claims and reality. Wh
 
 LLM Speed Test runs fixed scenarios (debug triage, document analysis, coding) and reports TTFT, total latency, and decode tokens per second from real streaming responses. Export JSON and share when someone asks “how fast is it, really?”
 
-— **Lulu Cheng**, Milliery
+— **Manuel Milliery**, Milliery
 
 ## Privacy & API keys
 

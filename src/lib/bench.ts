@@ -1,4 +1,5 @@
 import type { BenchMetrics, EndpointConfig, TestPreset } from './types'
+import { redactHeaders, type LogEntry } from './log'
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
@@ -12,7 +13,6 @@ function chatCompletionsUrl(baseUrl: string): string {
 }
 
 function estimateTokens(text: string): number {
-  // Rough fallback when providers omit usage in the stream.
   const words = text.trim().split(/\s+/).filter(Boolean).length
   return Math.max(1, Math.round(words * 1.3))
 }
@@ -59,11 +59,21 @@ export type StreamBenchInput = {
 export type StreamBenchOutput = {
   metrics: BenchMetrics
   preview: string
+  log: LogEntry
+}
+
+function headersToObject(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {}
+  headers.forEach((value, key) => {
+    out[key] = value
+  })
+  return out
 }
 
 /**
  * Runs one streaming chat completion against an OpenAI-compatible endpoint
- * and measures TTFT, total latency, and tokens/sec.
+ * and measures TTFT, total latency, and tokens/sec. Captures a full request
+ * + response log entry for debugging and sharing.
  */
 export async function runStreamBench(
   input: StreamBenchInput,
@@ -97,31 +107,86 @@ export async function runStreamBench(
   if (endpoint.apiKey.trim()) {
     headers.Authorization = `Bearer ${endpoint.apiKey.trim()}`
   }
-  // OpenRouter etiquette headers (harmless elsewhere).
-  headers['HTTP-Referer'] = typeof window !== 'undefined' ? window.location.origin : 'https://llm-speed-bench.local'
-  headers['X-Title'] = 'LLM Speed Bench'
+  headers['HTTP-Referer'] =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://llm-speed-test.milliery.local'
+  headers['X-Title'] = 'LLM Speed Test'
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal,
-  })
+  const logEntry: LogEntry = {
+    id:
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
+    ts: new Date().toISOString(),
+    level: 'info',
+    label: `${endpoint.label} · ${slug} · ${preset.name}`,
+    scenario: preset.name,
+    endpointLabel: endpoint.label,
+    baseUrl: endpoint.baseUrl,
+    slug,
+    request: {
+      method: 'POST',
+      url,
+      headers: redactHeaders(headers),
+      body,
+    },
+  }
+
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (err) {
+    if (signal?.aborted) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    logEntry.level = 'error'
+    logEntry.error = `Network/fetch error: ${message}`
+    return {
+      metrics: computeMetrics({
+        ttftMs: null,
+        totalMs: performance.now() - t0,
+        completionTokens: null,
+        promptTokens: null,
+        tokenSource: 'unknown',
+      }),
+      preview: '',
+      log: logEntry,
+    }
+  }
+
+  logEntry.response = {
+    status: res.status,
+    statusText: res.statusText,
+    headers: headersToObject(res.headers),
+    body: '',
+  }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '')
-    throw new Error(
-      `HTTP ${res.status}: ${errText.slice(0, 400) || res.statusText}`,
-    )
+    logEntry.response.body = errText
+    logEntry.level = 'error'
+    const message = `HTTP ${res.status} ${res.statusText} @ ${url} — ${errText.slice(0, 400) || '(empty body)'}`
+    logEntry.error = message
+    throw Object.assign(new Error(message), { logEntry })
   }
 
   if (!res.body) {
-    throw new Error('Response had no body (streaming unsupported by browser/proxy).')
+    const message =
+      'Response had no body (streaming unsupported by browser/proxy).'
+    logEntry.level = 'error'
+    logEntry.error = message
+    throw Object.assign(new Error(message), { logEntry })
   }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let rawChunks = ''
 
   const handleData = (payload: string) => {
     if (payload === '[DONE]') return
@@ -171,7 +236,10 @@ export async function runStreamBench(
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
+    const chunk = decoder.decode(value, { stream: true })
+    buffer += chunk
+    rawChunks += chunk
+    if (rawChunks.length > 8000) rawChunks = rawChunks.slice(-8000)
 
     let sep: number
     while ((sep = buffer.indexOf('\n')) >= 0) {
@@ -185,7 +253,6 @@ export async function runStreamBench(
     }
   }
 
-  // Flush remaining buffer.
   const leftover = buffer.trim()
   if (leftover.startsWith('data:')) {
     handleData(leftover.slice(5).trim())
@@ -201,6 +268,9 @@ export async function runStreamBench(
     tokenSource = 'estimated'
   }
 
+  logEntry.response.body = rawChunks || '(stream produced no data lines)'
+  logEntry.timing = { ttftMs, totalMs }
+
   const metrics = computeMetrics({
     ttftMs,
     totalMs,
@@ -212,5 +282,6 @@ export async function runStreamBench(
   return {
     metrics,
     preview: text.slice(0, 280),
+    log: logEntry,
   }
 }

@@ -1,6 +1,14 @@
 import { BRAND } from '../lib/brand'
 
-export function SiteHeader() {
+export type View = 'bench' | 'about'
+
+export function SiteHeader({
+  view,
+  onView,
+}: {
+  view: View
+  onView: (v: View) => void
+}) {
   return (
     <header className="flex flex-col gap-4 pt-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -9,7 +17,7 @@ export function SiteHeader() {
             aria-hidden
             className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-surface/80 text-sm font-semibold tracking-tight text-accent shadow-sm"
           >
-            LC
+            MM
           </div>
           <div>
             <p className="text-sm font-medium tracking-wide text-accent uppercase">
@@ -20,12 +28,34 @@ export function SiteHeader() {
             </p>
           </div>
         </div>
-        <a
-          href="#about"
-          className="text-sm font-medium text-accent underline-offset-4 hover:underline"
+        <nav
+          role="tablist"
+          className="inline-flex items-center gap-1 rounded-xl border border-border bg-surface/70 p-1"
         >
-          About
-        </a>
+          {(
+            [
+              { id: 'bench', label: 'Benchmark' },
+              { id: 'about', label: 'About' },
+            ] as { id: View; label: string }[]
+          ).map((tab) => {
+            const active = view === tab.id
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={active}
+                onClick={() => onView(tab.id)}
+                className={
+                  active
+                    ? 'rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-on-accent'
+                    : 'rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:text-foreground'
+                }
+              >
+                {tab.label}
+              </button>
+            )
+          })}
+        </nav>
       </div>
       <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
         {BRAND.siteTagline}
