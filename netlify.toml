@@ -2,6 +2,20 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/ingest"
+  to = "/.netlify/functions/ingest"
+  status = 200
+
+[[redirects]]
+  from = "/api/speed-index"
+  to = "/.netlify/functions/speed-index"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
