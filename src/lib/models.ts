@@ -2,9 +2,9 @@ import type { EndpointConfig } from './types'
 import { redactHeaders, type LogEntry } from './log'
 import {
   authHeaders,
-  detectProvider,
   modelsEndpointUrl,
   normalizeBaseUrl,
+  resolveProvider,
   validateBaseUrl,
 } from './providers'
 
@@ -139,7 +139,10 @@ export async function fetchModels(
 
   const hasKey = endpoint.apiKey.trim().length > 0
   if (!hasKey) {
-    const url = modelsEndpointUrl(baseUrl, detectProvider(baseUrl))
+    const url = modelsEndpointUrl(
+      baseUrl,
+      resolveProvider(baseUrl, endpoint.apiKey, endpoint.provider),
+    )
     const log = newLogEntry(endpoint, url)
     log.level = 'error'
     log.error = friendlyMessage('missing_key', 0, '', url)
@@ -151,7 +154,7 @@ export async function fetchModels(
     }
   }
 
-  const provider = detectProvider(baseUrl)
+  const provider = resolveProvider(baseUrl, endpoint.apiKey, endpoint.provider)
   const url = modelsEndpointUrl(baseUrl, provider)
   const headers = authHeaders(endpoint.apiKey, provider, baseUrl)
 

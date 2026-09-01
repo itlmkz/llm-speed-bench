@@ -1,8 +1,12 @@
+import type { ProviderType } from './providers'
+
 export type EndpointConfig = {
   id: string
   label: string
   baseUrl: string
   apiKey: string
+  /** Optional explicit provider override; otherwise auto-detected from baseUrl. */
+  provider?: ProviderType
 }
 
 export type ModelTarget = {
