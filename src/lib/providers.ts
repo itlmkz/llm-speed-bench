@@ -25,6 +25,22 @@ export function isNativeAnthropic(baseUrl: string): boolean {
   )
 }
 
+/**
+ * Resolve the effective provider for an endpoint: an explicit override wins,
+ * otherwise auto-detect from the base URL, with an sk-ant- key fallback.
+ */
+export function resolveProvider(
+  baseUrl: string,
+  apiKey: string,
+  override?: ProviderType,
+): ProviderType {
+  if (override && override !== 'unknown') return override
+  const byUrl = detectProvider(baseUrl)
+  if (byUrl !== 'unknown') return byUrl
+  if (/^sk-ant-/i.test(apiKey.trim())) return 'anthropic'
+  return 'openai'
+}
+
 export function detectProvider(baseUrl: string): ProviderType {
   const host = hostOf(baseUrl)
   if (!host) return 'unknown'
