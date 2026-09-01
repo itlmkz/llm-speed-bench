@@ -14,7 +14,6 @@ import {
 } from '@heroui/react'
 import { EmptyState } from '@heroui-pro/react/empty-state'
 import { ItemCard } from '@heroui-pro/react/item-card'
-import { KPI } from '@heroui-pro/react/kpi'
 import { runStreamBench } from './lib/bench'
 import { formatMs, formatTokPerSec, formatTokens } from './lib/format'
 import { TEST_PRESETS, presetById } from './lib/presets'
@@ -34,20 +33,56 @@ import type {
   TestPresetId,
 } from './lib/types'
 import { AboutSection } from './components/AboutSection'
+import { RunComparison } from './components/RunComparison'
+import { SpeedIndexSection } from './components/SpeedIndexSection'
 import { SiteHeader, type View } from './components/SiteHeader'
 import { BRAND } from './lib/brand'
+import {
+  contributeRun,
+  loadContributePref,
+  saveContributePref,
+} from './lib/contribute'
+import { classifyBenchError, type ErrorKind } from './lib/errors'
 import { downloadLogs, type LogEntry } from './lib/log'
 import { fetchModels } from './lib/models'
 import {
+  looksLikeCorsError,
   providerLabel,
   providerSubtype,
   resolveProvider,
   validateBaseUrl,
 } from './lib/providers'
 import { PROVIDER_PRESETS } from './lib/providerPresets'
+import { hashPromptVersion } from './lib/speedPayload'
 
 function resultKey(presetId: string, modelId: string): string {
   return `${presetId}::${modelId}`
+}
+
+function viewFromHash(hash: string): View {
+  switch (hash) {
+    case '#about':
+      return 'about'
+    case '#index':
+      return 'index'
+    default:
+      return 'bench'
+  }
+}
+
+function hashForView(view: View): string {
+  switch (view) {
+    case 'about':
+      return '#about'
+    case 'index':
+      return '#index'
+    case 'bench':
+      return ''
+    default: {
+      const _exhaustive: never = view
+      return _exhaustive
+    }
+  }
 }
 
 function statusColor(
@@ -75,6 +110,7 @@ export default function App() {
   const [results, setResults] = useState<BenchResult[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [running, setRunning] = useState(false)
+  const [contribute, setContribute] = useState(false)
   const [modelState, setModelState] = useState<
     Record<
       string,
@@ -87,8 +123,8 @@ export default function App() {
     >
   >({})
   const [view, setView] = useState<View>(() =>
-    typeof window !== 'undefined' && window.location.hash === '#about'
-      ? 'about'
+    typeof window !== 'undefined'
+      ? viewFromHash(window.location.hash)
       : 'bench',
   )
   const abortRef = useRef<AbortController | null>(null)
@@ -96,6 +132,7 @@ export default function App() {
 
   useEffect(() => {
     setConfig(loadConfig())
+    setContribute(loadContributePref())
     setHydrated(true)
   }, [])
 
@@ -106,7 +143,7 @@ export default function App() {
 
   useEffect(() => {
     const onHash = () => {
-      setView(window.location.hash === '#about' ? 'about' : 'bench')
+      setView(viewFromHash(window.location.hash))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -115,7 +152,7 @@ export default function App() {
   const switchView = (v: View) => {
     setView(v)
     if (typeof window !== 'undefined') {
-      const newHash = v === 'about' ? '#about' : ''
+      const newHash = hashForView(v)
       if (window.location.hash !== newHash) {
         const next = newHash
           ? `${window.location.pathname}${window.location.search}${newHash}`
@@ -130,26 +167,6 @@ export default function App() {
     for (const endpoint of config.endpoints) map.set(endpoint.id, endpoint)
     return map
   }, [config.endpoints])
-
-  const summary = useMemo(() => {
-    const ok = results.filter((row) => row.status === 'ok' && row.metrics)
-    if (!ok.length) return null
-    const avg = (
-      pick: (metrics: NonNullable<BenchResult['metrics']>) => number | null,
-    ) => {
-      const values = ok
-        .map((row) => pick(row.metrics!))
-        .filter((value): value is number => value != null && !Number.isNaN(value))
-      if (!values.length) return null
-      return values.reduce((a, b) => a + b, 0) / values.length
-    }
-    return {
-      decode: avg((metrics) => metrics.decodeTokPerSec),
-      overall: avg((metrics) => metrics.overallTokPerSec),
-      ttft: avg((metrics) => metrics.ttftMs),
-      okCount: ok.length,
-    }
-  }, [results])
 
   const updateEndpoint = (id: string, patch: Partial<EndpointConfig>) => {
     setConfig((current) => ({
@@ -313,6 +330,15 @@ export default function App() {
     }
     setResults(initial)
 
+    const promptVersions = new Map<string, string>()
+    for (const preset of presets) {
+      if (!preset) continue
+      promptVersions.set(
+        preset.id,
+        await hashPromptVersion(preset.id, preset.system, preset.user),
+      )
+    }
+
     for (const row of initial) {
       if (controller.signal.aborted) break
       const preset = presetById(row.presetId)
@@ -326,6 +352,16 @@ export default function App() {
             : result,
         ),
       )
+
+      const providerType =
+        resolveProvider(
+          endpoint.baseUrl,
+          endpoint.apiKey,
+          endpoint.provider,
+        ) === 'anthropic'
+          ? 'anthropic'
+          : 'openai'
+      const promptVersion = promptVersions.get(preset.id) ?? ''
 
       try {
         const output = await runStreamBench({
@@ -347,11 +383,35 @@ export default function App() {
               : result,
           ),
         )
+        void contributeRun({
+          providerType,
+          baseUrl: endpoint.baseUrl,
+          endpointLabel: endpoint.label,
+          modelSlug: row.slug,
+          taskId: row.presetId,
+          promptVersion,
+          status: 'ok',
+          metrics: output.metrics,
+          errorKind: 'none',
+          httpStatus: output.log.response?.status ?? 200,
+          appVersion: BRAND.appVersion,
+        })
       } catch (error) {
         if (controller.signal.aborted) break
         const message = error instanceof Error ? error.message : String(error)
         const logFromError =
           (error as { logEntry?: LogEntry })?.logEntry
+        const httpStatus =
+          typeof (error as { httpStatus?: number }).httpStatus === 'number'
+            ? (error as { httpStatus: number }).httpStatus
+            : (logFromError?.response?.status ?? null)
+        const errorKind: ErrorKind =
+          (error as { errorKind?: ErrorKind }).errorKind ??
+          classifyBenchError({
+            message,
+            httpStatus,
+            cors: looksLikeCorsError(error),
+          })
         if (logFromError) {
           setLogs((current) => [...current, logFromError])
         }
@@ -362,6 +422,18 @@ export default function App() {
               : result,
           ),
         )
+        void contributeRun({
+          providerType,
+          baseUrl: endpoint.baseUrl,
+          endpointLabel: endpoint.label,
+          modelSlug: row.slug,
+          taskId: row.presetId,
+          promptVersion,
+          status: 'error',
+          errorKind,
+          httpStatus,
+          appVersion: BRAND.appVersion,
+        })
       }
     }
 
@@ -415,15 +487,17 @@ export default function App() {
                 <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
                   {BRAND.localStorageKey}
                 </code>
-                ). Netlify and our backend never see them. When you run a
-                benchmark, your browser calls the provider directly. Export
-                JSON leaves the keys out. Clear site data or switch browsers
-                and they&apos;re gone.
+                ). They are never written to Neon, Netlify logs, or the
+                downloadable request log. When you run a benchmark, your
+                browser calls the provider directly. Export JSON leaves the
+                keys out.
               </Alert.Description>
             </Alert.Content>
           </Alert>
           <AboutSection />
         </>
+      ) : view === 'index' ? (
+        <SpeedIndexSection />
       ) : (
         <>
           <Alert status="accent">
@@ -436,10 +510,11 @@ export default function App() {
                 <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
                   {BRAND.localStorageKey}
                 </code>
-                ). Netlify and our backend never see them. When you run a
-                benchmark, your browser calls the provider directly. Export
-                JSON leaves the keys out. Clear site data or switch browsers
-                and they&apos;re gone.
+                ). They are never written to Neon, Netlify logs, or the
+                downloadable request log. When you run a benchmark, your
+                browser calls the provider directly. Export JSON leaves the
+                keys out. Clear site data or switch browsers and they&apos;re
+                gone.
               </Alert.Description>
             </Alert.Content>
           </Alert>
@@ -509,8 +584,7 @@ export default function App() {
                     <Label>API key</Label>
                     <Input placeholder="sk-… / sk-ant-…" autoComplete="off" />
                     <Description>
-                      Stays in this browser&apos;s localStorage, never on a
-                      server.
+                      Stays in this browser. Never written to Neon or logs.
                     </Description>
                   </TextField>
                   <Button
@@ -792,12 +866,28 @@ export default function App() {
             We measure TTFT, total time, decode tok/s, and overall tok/s.
             Runs one after another.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             {running ? (
               <Button variant="secondary" onPress={stop}>
                 Stop
               </Button>
             ) : null}
+            <label className="flex max-w-xs cursor-pointer items-start gap-2 text-xs text-muted">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={contribute}
+                onChange={(event) => {
+                  const next = event.target.checked
+                  setContribute(next)
+                  saveContributePref(next)
+                }}
+              />
+              <span>
+                Share anonymized speed with the public index (model, task,
+                country — never keys or headers)
+              </span>
+            </label>
             <Button
               variant="primary"
               isDisabled={
@@ -822,48 +912,7 @@ export default function App() {
         </Card.Footer>
       </Card>
 
-      {summary ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <KPI>
-            <KPI.Header>
-              <KPI.Title>Avg decode tok/s</KPI.Title>
-            </KPI.Header>
-            <KPI.Content>
-              <p className="mono text-3xl font-semibold text-foreground">
-                {formatTokPerSec(summary.decode)}
-              </p>
-            </KPI.Content>
-          </KPI>
-          <KPI>
-            <KPI.Header>
-              <KPI.Title>Avg overall tok/s</KPI.Title>
-            </KPI.Header>
-            <KPI.Content>
-              <p className="mono text-3xl font-semibold text-foreground">
-                {formatTokPerSec(summary.overall)}
-              </p>
-            </KPI.Content>
-          </KPI>
-          <KPI>
-            <KPI.Header>
-              <KPI.Title>Avg TTFT</KPI.Title>
-            </KPI.Header>
-            <KPI.Content>
-              <p className="mono text-3xl font-semibold text-foreground">
-                {formatMs(summary.ttft)}
-              </p>
-            </KPI.Content>
-          </KPI>
-          <KPI>
-            <KPI.Header>
-              <KPI.Title>Successful runs</KPI.Title>
-            </KPI.Header>
-            <KPI.Content>
-              <KPI.Value className="mono" value={summary.okCount} />
-            </KPI.Content>
-          </KPI>
-        </div>
-      ) : null}
+      <RunComparison results={results} />
 
       <Card>
         <Card.Header className="flex flex-row items-start justify-between gap-3">
@@ -984,9 +1033,10 @@ export default function App() {
           </a>
         </p>
         <p>
-          <strong className="text-foreground">Privacy:</strong> your keys
-          and config live only in your browser&apos;s localStorage. This is a
-          static site — we never see or store your keys.
+          <strong className="text-foreground">Privacy:</strong> API keys stay
+          in this browser. They are never stored in Neon or in logs. You can
+          opt in to share anonymized speed (model, provider host, task,
+          country) with the public index.
         </p>
         <p>
           Requests go straight from your browser to each provider. If a
