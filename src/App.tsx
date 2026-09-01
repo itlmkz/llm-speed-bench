@@ -158,6 +158,7 @@ export default function App() {
         endpoint.id === id ? { ...endpoint, ...patch } : endpoint,
       ),
     }))
+    // If URL or key changed, reset fetch state so auto-fetch re-runs.
     if ('baseUrl' in patch || 'apiKey' in patch) {
       setModelState((current) =>
         current[id]
@@ -214,6 +215,8 @@ export default function App() {
     }))
   }
 
+  // Auto-fetch models for endpoints that have a valid URL + key and haven't
+  // been fetched yet (debounced). Keeps the experience smooth without spamming.
   useEffect(() => {
     if (!hydrated) return
     for (const endpoint of config.endpoints) {
@@ -234,6 +237,7 @@ export default function App() {
     return () => {
       for (const t of Object.values(fetchTimers.current)) clearTimeout(t)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, config.endpoints, config.endpoints.length])
 
   const removeEndpoint = (id: string) => {
@@ -397,7 +401,579 @@ export default function App() {
   return (
     <div className="page flex flex-col gap-6">
       <SiteHeader view={view} onView={switchView} />
-      PLACEHOLDER_REST
+
+      {view === 'about' ? (
+        <>
+          <Alert status="accent">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Your API keys never leave your browser</Alert.Title>
+              <Alert.Description>
+                Keys are saved only in this device&apos;s{' '}
+                <strong>localStorage</strong> (key:{' '}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
+                  {BRAND.localStorageKey}
+                </code>
+                ). They are not sent to Netlify or any backend. When you run a
+                benchmark, your browser calls the provider directly. Export JSON
+                omits keys. Clearing site data or using another browser removes
+                them.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
+          <AboutSection />
+        </>
+      ) : (
+        <>
+          <Alert status="accent">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Your API keys never leave your browser</Alert.Title>
+              <Alert.Description>
+                Keys are saved only in this device&apos;s{' '}
+                <strong>localStorage</strong> (key:{' '}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono text-xs">
+                  {BRAND.localStorageKey}
+                </code>
+                ). They are not sent to Netlify or any backend. When you run a
+                benchmark, your browser calls the provider directly. Export JSON
+                omits keys. Clearing site data or using another browser removes
+                them.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
+
+      <Card>
+        <Card.Header>
+          <Card.Title>Endpoints</Card.Title>
+          <Card.Description>
+            OpenRouter, xAI/Grok, OpenAI, Anthropic, Groq, Ollama, or any
+            OpenAI-compatible base URL. Provider type is detected
+            automatically. Paste each provider&apos;s API key below — it stays
+            in your browser only.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content className="flex flex-col gap-4">
+          {config.endpoints.map((endpoint) => {
+            const provider = resolveProvider(
+              endpoint.baseUrl,
+              endpoint.apiKey,
+              endpoint.provider,
+            )
+            const validation = validateBaseUrl(endpoint.baseUrl)
+            const ms = modelState[endpoint.id]
+            const fetchStatus = ms?.status ?? 'idle'
+            return (
+              <div
+                key={endpoint.id}
+                className="flex flex-col gap-3 rounded-2xl border border-border bg-surface/70 p-4"
+              >
+                <div className="grid gap-3 md:grid-cols-[1fr_1.4fr_1.3fr_auto] md:items-end">
+                  <TextField
+                    aria-label="Endpoint label"
+                    value={endpoint.label}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { label: value })
+                    }
+                  >
+                    <Label>Label</Label>
+                    <Input placeholder="OpenRouter" />
+                  </TextField>
+                  <TextField
+                    aria-label="Base URL"
+                    value={endpoint.baseUrl}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { baseUrl: value })
+                    }
+                  >
+                    <Label>Base URL</Label>
+                    <Input
+                      className="font-mono text-sm"
+                      placeholder="https://openrouter.ai/api/v1"
+                      spellCheck={false}
+                    />
+                    {validation.suspect ? (
+                      <Description className="text-warning">
+                        ⚠ {validation.reason}
+                      </Description>
+                    ) : null}
+                  </TextField>
+                  <TextField
+                    aria-label="API key"
+                    type="password"
+                    value={endpoint.apiKey}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { apiKey: value })
+                    }
+                  >
+                    <Label>API key</Label>
+                    <Input placeholder="sk-… / sk-ant-…" autoComplete="off" />
+                    <Description>
+                      Stored locally in this browser (localStorage), not on
+                      our servers.
+                    </Description>
+                  </TextField>
+                  <Button
+                    variant="ghost"
+                    className="text-danger"
+                    isDisabled={config.endpoints.length <= 1}
+                    onPress={() => removeEndpoint(endpoint.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3 text-sm">
+                  <Chip
+                    color={
+                      provider === 'unknown'
+                        ? 'default'
+                        : provider === 'anthropic'
+                          ? 'accent'
+                          : 'success'
+                    }
+                    variant="soft"
+                    size="sm"
+                  >
+                    <Chip.Label>{providerLabel(provider)}</Chip.Label>
+                  </Chip>
+                  {provider === 'anthropic' ? (
+                    <span className="text-xs text-muted">
+                      {providerSubtype(provider, endpoint.baseUrl)}
+                    </span>
+                  ) : null}
+                  <Button
+                    variant="secondary"
+                    isDisabled={
+                      fetchStatus === 'loading' ||
+                      validation.suspect ||
+                      !endpoint.apiKey.trim()
+                    }
+                    onPress={() => fetchModelsFor(endpoint.id)}
+                  >
+                    {fetchStatus === 'loading' ? (
+                      <>
+                        <Spinner size="sm" color="current" />
+                        Fetching…
+                      </>
+                    ) : (
+                      'Fetch models'
+                    )}
+                  </Button>
+                  {fetchStatus === 'ok' ? (
+                    <span className="text-xs text-muted">
+                      ✓ {ms?.models.length ?? 0} model
+                      {ms?.models.length === 1 ? '' : 's'} available
+                    </span>
+                  ) : null}
+                  {fetchStatus === 'error' ? (
+                    <span className="text-xs text-danger">
+                      {ms?.error}
+                    </span>
+                  ) : null}
+                  {fetchStatus === 'idle' &&
+                  endpoint.apiKey.trim() &&
+                  !validation.suspect ? (
+                    <span className="text-xs text-muted">
+                      Auto-fetching models…
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
+        </Card.Content>
+        <Card.Footer className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-foreground">
+              Add provider from list
+            </span>
+            <select
+              aria-label="Add provider from list"
+              value=""
+              onChange={(e) => {
+                const value = e.target.value
+                e.target.value = ''
+                if (value) addFromPreset(value)
+              }}
+              className="max-w-xs rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
+            >
+              <option value="" disabled>
+                Pick a known provider…
+              </option>
+              {PROVIDER_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            variant="secondary"
+            onPress={() =>
+              setConfig((current) => ({
+                ...current,
+                endpoints: [...current.endpoints, newEndpoint()],
+              }))
+            }
+          >
+            Add custom URL
+          </Button>
+        </Card.Footer>
+      </Card>
+
+      <Card>
+        <Card.Header>
+          <Card.Title>Model slugs</Card.Title>
+          <Card.Description>
+            Pair each slug with an endpoint. Run several models in one pass.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content className="flex flex-col gap-4">
+          {config.models.map((model) => (
+            <div
+              key={model.id}
+              className="grid gap-3 rounded-2xl border border-border bg-surface/70 p-4 md:grid-cols-[1.2fr_2fr_auto] md:items-end"
+            >
+              <Select
+                aria-label="Endpoint"
+                selectedKey={model.endpointId}
+                onSelectionChange={(key) => {
+                  if (key == null) return
+                  updateModel(model.id, { endpointId: String(key) })
+                }}
+              >
+                <Label>Endpoint</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {config.endpoints.map((endpoint) => (
+                      <ListBox.Item
+                        key={endpoint.id}
+                        id={endpoint.id}
+                        textValue={endpoint.label}
+                      >
+                        {endpoint.label}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+              <TextField
+                aria-label="Model slug"
+                value={model.slug}
+                onChange={(value) => updateModel(model.id, { slug: value })}
+              >
+                <Label>Slug</Label>
+                <Input
+                  className="font-mono text-sm"
+                  placeholder="openai/gpt-4o-mini"
+                  spellCheck={false}
+                  list={`models-${model.endpointId}`}
+                />
+                <Description>
+                  {(() => {
+                    const fetched = modelState[model.endpointId]?.models ?? []
+                    if (fetched.length) {
+                      return `Pick from ${fetched.length} fetched models, or type a slug.`
+                    }
+                    return 'Type a slug, or fetch models for the endpoint above.'
+                  })()}
+                </Description>
+              </TextField>
+              {(() => {
+                const fetched = modelState[model.endpointId]?.models ?? []
+                if (!fetched.length) return null
+                return (
+                  <datalist id={`models-${model.endpointId}`}>
+                    {fetched.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                )
+              })()}
+              <Button
+                variant="ghost"
+                className="text-danger"
+                onPress={() => removeModel(model.id)}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+        </Card.Content>
+        <Card.Footer>
+          <Button
+            variant="secondary"
+            onPress={() =>
+              setConfig((current) => ({
+                ...current,
+                models: [
+                  ...current.models,
+                  newModel(current.endpoints[0]?.id ?? '', ''),
+                ],
+              }))
+            }
+          >
+            Add slug
+          </Button>
+        </Card.Footer>
+      </Card>
+
+      <Card>
+        <Card.Header>
+          <Card.Title>Test scenarios</Card.Title>
+          <Card.Description>
+            Fixed prompts so latency and tokens/sec stay comparable across
+            models.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content>
+          <div className="grid gap-3 md:grid-cols-3">
+            {TEST_PRESETS.map((preset) => {
+              const active = config.selectedPresets.includes(preset.id)
+              return (
+                <ItemCard
+                  key={preset.id}
+                  variant={active ? 'secondary' : 'default'}
+                  className={
+                    active
+                      ? 'cursor-pointer border-accent ring-2 ring-accent/25'
+                      : 'cursor-pointer'
+                  }
+                  onClick={() => togglePreset(preset.id)}
+                >
+                  <ItemCard.Content>
+                    <ItemCard.Title>{preset.name}</ItemCard.Title>
+                    <ItemCard.Description>
+                      {preset.description}
+                    </ItemCard.Description>
+                  </ItemCard.Content>
+                  <ItemCard.Action>
+                    <Chip
+                      color={active ? 'accent' : 'default'}
+                      variant="soft"
+                      size="sm"
+                    >
+                      <Chip.Label>{active ? 'On' : 'Off'}</Chip.Label>
+                    </Chip>
+                  </ItemCard.Action>
+                </ItemCard>
+              )
+            })}
+          </div>
+        </Card.Content>
+        <Card.Footer className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">
+            Metrics: TTFT, total time, decode tok/s, overall tok/s. Runs
+            sequentially.
+          </p>
+          <div className="flex gap-2">
+            {running ? (
+              <Button variant="secondary" onPress={stop}>
+                Stop
+              </Button>
+            ) : null}
+            <Button
+              variant="primary"
+              isDisabled={
+                running ||
+                !config.selectedPresets.length ||
+                !config.models.some((model) => model.slug.trim())
+              }
+              onPress={() => {
+                void runAll()
+              }}
+            >
+              {running ? (
+                <>
+                  <Spinner size="sm" color="current" />
+                  Running…
+                </>
+              ) : (
+                'Run benchmark'
+              )}
+            </Button>
+          </div>
+        </Card.Footer>
+      </Card>
+
+      {summary ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Avg decode tok/s</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <p className="mono text-3xl font-semibold text-foreground">
+                {formatTokPerSec(summary.decode)}
+              </p>
+            </KPI.Content>
+          </KPI>
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Avg overall tok/s</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <p className="mono text-3xl font-semibold text-foreground">
+                {formatTokPerSec(summary.overall)}
+              </p>
+            </KPI.Content>
+          </KPI>
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Avg TTFT</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <p className="mono text-3xl font-semibold text-foreground">
+                {formatMs(summary.ttft)}
+              </p>
+            </KPI.Content>
+          </KPI>
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Successful runs</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <KPI.Value className="mono" value={summary.okCount} />
+            </KPI.Content>
+          </KPI>
+        </div>
+      ) : null}
+
+      <Card>
+        <Card.Header className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <Card.Title>Results</Card.Title>
+            <Card.Description>
+              Per-run TTFT, total latency, and tokens/sec.
+            </Card.Description>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {logs.length > 0 ? (
+              <span className="text-xs text-muted">
+                {logs.length} log{logs.length === 1 ? '' : 's'}
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              isDisabled={!logs.length}
+              onPress={() => downloadLogs(logs)}
+            >
+              Download log
+            </Button>
+            <Button
+              variant="secondary"
+              isDisabled={!results.length}
+              onPress={exportJson}
+            >
+              Export JSON
+            </Button>
+          </div>
+        </Card.Header>
+        <Card.Content>
+          {!results.length ? (
+            <EmptyState className="py-10">
+              <EmptyState.Header>
+                <EmptyState.Title>No runs yet</EmptyState.Title>
+                <EmptyState.Description>
+                  Configure endpoints and slugs, pick scenarios, then click Run
+                  benchmark.
+                </EmptyState.Description>
+              </EmptyState.Header>
+            </EmptyState>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs tracking-wide text-muted uppercase">
+                    <th className="px-2 py-3 font-medium">Status</th>
+                    <th className="px-2 py-3 font-medium">Scenario</th>
+                    <th className="px-2 py-3 font-medium">Endpoint</th>
+                    <th className="px-2 py-3 font-medium">Model</th>
+                    <th className="mono px-2 py-3 font-medium">TTFT</th>
+                    <th className="mono px-2 py-3 font-medium">Total</th>
+                    <th className="mono px-2 py-3 font-medium">Decode tok/s</th>
+                    <th className="mono px-2 py-3 font-medium">Overall tok/s</th>
+                    <th className="mono px-2 py-3 font-medium">Out tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.map((result) => (
+                    <tr
+                      key={result.key}
+                      className="border-b border-border/70 align-top"
+                    >
+                      <td className="px-2 py-3">
+                        <Chip
+                          color={statusColor(result.status)}
+                          variant="soft"
+                          size="sm"
+                        >
+                          <Chip.Label>{result.status}</Chip.Label>
+                        </Chip>
+                        {result.error ? (
+                          <p className="mt-1 max-w-[14rem] text-xs whitespace-pre-wrap text-danger">
+                            {result.error}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-3">
+                        {presetById(result.presetId)?.name ?? result.presetId}
+                      </td>
+                      <td className="px-2 py-3">{result.endpointLabel}</td>
+                      <td className="mono px-2 py-3 text-xs">{result.slug}</td>
+                      <td className="mono px-2 py-3">
+                        {formatMs(result.metrics?.ttftMs)}
+                      </td>
+                      <td className="mono px-2 py-3">
+                        {formatMs(result.metrics?.totalMs)}
+                      </td>
+                      <td className="mono px-2 py-3 font-semibold text-accent">
+                        {formatTokPerSec(result.metrics?.decodeTokPerSec)}
+                      </td>
+                      <td className="mono px-2 py-3">
+                        {formatTokPerSec(result.metrics?.overallTokPerSec)}
+                      </td>
+                      <td className="mono px-2 py-3">
+                        {formatTokens(result.metrics?.completionTokens)}
+                        {result.metrics?.tokenSource === 'estimated' ? '≈' : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card.Content>
+      </Card>
+
+      <footer className="space-y-2 text-sm text-muted">
+        <p>
+          <strong className="text-foreground">{BRAND.siteName}</strong> by{' '}
+          {BRAND.author} · {BRAND.studio}.{' '}
+          <a
+            href={BRAND.siteUrl}
+            className="text-accent underline-offset-4 hover:underline"
+          >
+            {BRAND.siteUrl.replace('https://', '')}
+          </a>
+        </p>
+        <p>
+          <strong className="text-foreground">Privacy:</strong> API keys and
+          config live in your browser&apos;s localStorage only. Static hosting
+          only — we never receive or store your keys.
+        </p>
+        <p>
+          Benchmark requests go from your browser to each provider. CORS must
+          allow browser calls.
+        </p>
+      </footer>
+        </>
+      )}
     </div>
   )
 }
