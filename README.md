@@ -1,12 +1,40 @@
-# LLM Speed Bench
+# LLM Speed Test
 
-Browser tool to measure **real streaming speed** of OpenAI-compatible LLM APIs.
+**By [Lulu Cheng](https://llm-speed-test.milliery.com) · Milliery**
+
+Browser tool to measure **real streaming speed** of OpenAI-compatible LLM APIs — not the cherry-picked numbers on a provider slide deck.
+
+**Live:** https://llm-speed-test.milliery.com  
+**Also:** https://llm-speed-bench.netlify.app (Netlify default URL until DNS is pointed)
 
 Add one or more base URLs (OpenRouter, xAI/Grok, OpenAI, Groq, Ollama, …), attach model slugs, pick scenarios, click **Run benchmark**.
 
-API keys stay in your browser (`localStorage`). There is no backend.
+API keys stay in your browser only — see [Privacy & API keys](#privacy--api-keys) below. There is no backend.
 
-UI is built with **[HeroUI Pro](https://heroui.pro)** on the **Mouve light** theme (warm mauve accents — not dark, not teal).
+## About
+
+Every week a provider publishes a new “fastest model” headline — tokens per second on a synthetic benchmark, latency on a toy prompt, numbers that rarely match production.
+
+I built this because I was tired of the gap between those claims and reality. When you pick a model and a provider, you deserve to know how fast it actually streams with **your** API key, **your** region, and **your** workload.
+
+LLM Speed Test runs fixed scenarios (debug triage, document analysis, coding) and reports TTFT, total latency, and decode tokens per second from real streaming responses. Export JSON and share when someone asks “how fast is it, really?”
+
+— **Lulu Cheng**, Milliery
+
+## Privacy & API keys
+
+This app is **client-only**. We do not operate a server that receives or stores your API keys.
+
+| What | Where |
+| --- | --- |
+| **API keys** | Your browser’s `localStorage`, key `llm-speed-bench:v1`, inside each endpoint’s `apiKey` field |
+| **Who can read them** | Only scripts on this origin in your browser (you, on this device) |
+| **Who cannot** | Netlify (static hosting only), this repo’s authors, other users |
+| **When keys are used** | On “Run benchmark”, your browser sends them directly to the provider (e.g. OpenRouter) as `Authorization: Bearer …` |
+| **Export JSON** | Keys are **not** included — only `apiKeySet: true/false` |
+| **If you switch browser / clear site data** | Keys are gone until you paste them again |
+
+The live site explains this in the UI banner and next to each API key field.
 
 ## Metrics
 
@@ -56,6 +84,14 @@ Any static host works. Example Netlify:
 ```
 
 Or GitHub Pages / Cloudflare Pages / Vercel — publish `dist`.
+
+**Live demo:** https://llm-speed-test.milliery.com
+
+### Custom domain (milliery.com)
+
+Point a CNAME record for `llm-speed-test` to your Netlify site URL, then add the domain in Netlify → Domain management → Add domain alias.
+
+For Netlify builds from Git, set `HEROUI_AUTH_TOKEN` in the site’s build environment (Site settings → Environment variables, scope: Builds).
 
 ## Related tools
 
