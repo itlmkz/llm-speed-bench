@@ -84,11 +84,19 @@ export async function fetchSpeedIndex(args?: {
   if (args?.model) params.set('model', args.model)
   const qs = params.toString()
   const res = await fetch(`/api/speed-index${qs ? `?${qs}` : ''}`)
-  if (res.status === 503) {
+  const contentType = res.headers.get('content-type') ?? ''
+  if (
+    res.status === 503 ||
+    !contentType.includes('application/json')
+  ) {
     return { window: args?.window ?? '7d', configured: false, rows: [] }
   }
   if (!res.ok) {
     throw new Error(`Speed index returned HTTP ${res.status}`)
   }
-  return (await res.json()) as SpeedIndexResponse
+  try {
+    return (await res.json()) as SpeedIndexResponse
+  } catch {
+    return { window: args?.window ?? '7d', configured: false, rows: [] }
+  }
 }
