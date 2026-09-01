@@ -1,5 +1,5 @@
 import type { EndpointConfig } from './types'
-import { redactHeaders, type LogEntry } from './log'
+import { redactHeaders, redactSecretsInString, redactUrl, type LogEntry } from './log'
 import {
   applyProxy,
   authHeaders,
@@ -45,7 +45,7 @@ function newLogEntry(endpoint: EndpointConfig, url: string): LogEntry {
     slug: '',
     request: {
       method: 'GET',
-      url,
+      url: redactUrl(url),
       headers: {},
       body: null,
     },
@@ -165,6 +165,7 @@ export async function fetchModels(
 
   const log = newLogEntry(endpoint, url)
   log.request.headers = redactHeaders(headers)
+  log.request.url = redactUrl(url)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -202,13 +203,13 @@ export async function fetchModels(
   log.response = {
     status: res.status,
     statusText: res.statusText,
-    headers: Object.fromEntries(res.headers.entries()),
+    headers: redactHeaders(Object.fromEntries(res.headers.entries())),
     body: '',
   }
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
-    log.response.body = bodyText
+    log.response.body = redactSecretsInString(bodyText)
     log.level = 'error'
     const kind = classifyStatus(res.status, hasKey)
     log.error = friendlyMessage(kind, res.status, bodyText, url)
@@ -216,7 +217,7 @@ export async function fetchModels(
   }
 
   const text = await res.text().catch(() => '')
-  log.response.body = text.slice(0, 4000)
+  log.response.body = redactSecretsInString(text.slice(0, 4000))
   let json: unknown
   try {
     json = JSON.parse(text)
