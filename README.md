@@ -6,6 +6,8 @@ Add one or more base URLs (OpenRouter, xAI/Grok, OpenAI, Groq, Ollama, …), att
 
 API keys stay in your browser (`localStorage`). There is no backend.
 
+UI is built with **[HeroUI Pro](https://heroui.pro)** on the **Mouve light** theme (warm mauve accents — not dark, not teal).
+
 ## Metrics
 
 | Metric | Meaning |
@@ -27,7 +29,10 @@ Toggle any combination, then run.
 
 ## Quick start
 
+HeroUI Pro needs a license token so the package can download Pro artifacts on install:
+
 ```bash
+export HEROUI_AUTH_TOKEN=your-token   # from https://heroui.pro/dashboard
 npm install
 npm run dev
 ```
