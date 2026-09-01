@@ -1,7 +1,9 @@
 import type { EndpointConfig } from './types'
 import { redactHeaders, type LogEntry } from './log'
 import {
+  applyProxy,
   authHeaders,
+  looksLikeCorsError,
   modelsEndpointUrl,
   normalizeBaseUrl,
   resolveProvider,
@@ -78,7 +80,9 @@ function friendlyMessage(
     case 'timeout':
       return `Timed out after ${FETCH_TIMEOUT_MS / 1000}s. The URL may be unreachable, or the key/URL combo is wrong.`
     case 'network':
-      return `Network error: ${detail}. Often a CORS block, an unreachable host, or an invalid URL.`
+      return detail.includes('CORS') || detail.includes('blocked')
+        ? detail
+        : `Network error: ${detail}. Often a CORS block, an unreachable host, or an invalid URL.`
     case 'parse':
       return `Got a response but couldn't read a model list from it. ${detail}`.trim()
     case 'other':
@@ -155,7 +159,8 @@ export async function fetchModels(
   }
 
   const provider = resolveProvider(baseUrl, endpoint.apiKey, endpoint.provider)
-  const url = modelsEndpointUrl(baseUrl, provider)
+  const targetUrl = modelsEndpointUrl(baseUrl, provider)
+  const url = applyProxy(targetUrl, endpoint.proxyUrl)
   const headers = authHeaders(endpoint.apiKey, provider, baseUrl)
 
   const log = newLogEntry(endpoint, url)
@@ -172,12 +177,21 @@ export async function fetchModels(
     clearTimeout(timer)
     const aborted =
       err instanceof DOMException && err.name === 'AbortError'
-    const kind: FetchModelsResult['errorKind'] = aborted ? 'timeout' : 'network'
+    const cors = !aborted && looksLikeCorsError(err)
+    const kind: FetchModelsResult['errorKind'] = aborted
+      ? 'timeout'
+      : cors
+        ? 'network'
+        : 'network'
     const detail = aborted
       ? ''
-      : err instanceof Error
-        ? err.message
-        : String(err)
+      : cors
+        ? `Browser blocked the response from ${targetUrl} (likely CORS). ` +
+          `This provider may not allow direct browser calls on this endpoint. ` +
+          `Try setting a CORS proxy URL on this endpoint, or use OpenRouter.`
+        : err instanceof Error
+          ? err.message
+          : String(err)
     log.level = 'error'
     log.error = friendlyMessage(kind, 0, detail, url)
     log.timing = { ttftMs: null, totalMs: performance.now() - t0 }

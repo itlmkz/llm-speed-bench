@@ -1,8 +1,10 @@
 import type { BenchMetrics, EndpointConfig, TestPreset } from './types'
 import { redactHeaders, type LogEntry } from './log'
 import {
+  applyProxy,
   authHeaders,
   chatEndpointUrl,
+  looksLikeCorsError,
   normalizeBaseUrl,
   resolveProvider,
 } from './providers'
@@ -434,7 +436,8 @@ export async function runStreamBench(
     endpoint.provider,
   )
   const baseUrl = normalizeBaseUrl(endpoint.baseUrl)
-  const url = chatEndpointUrl(baseUrl, provider)
+  const targetUrl = chatEndpointUrl(baseUrl, provider)
+  const url = applyProxy(targetUrl, endpoint.proxyUrl)
 
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -473,12 +476,19 @@ export async function runStreamBench(
     return { metrics: out.metrics, preview: out.preview, log: logEntry }
   } catch (error) {
     if (signal?.aborted) throw error
-    const message = error instanceof Error ? error.message : String(error)
+    const rawMessage = error instanceof Error ? error.message : String(error)
     if (!logEntry.error) {
       logEntry.level = 'error'
-      logEntry.error = `Network/fetch error: ${message}`
+      logEntry.error = looksLikeCorsError(error)
+        ? `CORS/network block: the browser rejected the response from ${targetUrl} (likely "${rawMessage}"). ` +
+          `This provider's streaming endpoint doesn't allow direct browser calls ` +
+          `(it's built for server-side use). Options: (a) use OpenRouter, which ` +
+          `allows browser calls; (b) set a CORS proxy URL on this endpoint and ` +
+          `retry; (c) try the provider's OpenAI-compatible endpoint if it ` +
+          `allows CORS.`
+        : `Network/fetch error: ${rawMessage}`
       logEntry.timing = { ttftMs: null, totalMs: performance.now() - t0 }
     }
-    throw Object.assign(new Error(message), { logEntry })
+    throw Object.assign(new Error(logEntry.error), { logEntry })
   }
 }

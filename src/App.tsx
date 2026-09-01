@@ -522,6 +522,26 @@ export default function App() {
                     Remove
                   </Button>
                 </div>
+                <div className="grid gap-3 border-t border-border/70 pt-3 md:grid-cols-[1fr_1.4fr_1.3fr] md:items-end">
+                  <TextField
+                    aria-label="CORS proxy (optional)"
+                    value={endpoint.proxyUrl ?? ''}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { proxyUrl: value })
+                    }
+                  >
+                    <Label>CORS proxy (optional)</Label>
+                    <Input
+                      className="font-mono text-sm"
+                      placeholder="https://your-proxy.example.com/"
+                      spellCheck={false}
+                    />
+                    <Description>
+                      If the browser blocks the stream (CORS), prefix requests
+                      through your own proxy. Leave empty otherwise.
+                    </Description>
+                  </TextField>
+                </div>
                 <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3 text-sm">
                   <Chip
                     color={
