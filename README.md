@@ -9,7 +9,7 @@ A browser tool for measuring **real streaming speed** from OpenAI-compatible and
 
 Add an endpoint, choose a model, pick a scenario, and hit **Run benchmark**.
 
-Your API keys stay in your browser. See [Privacy & API keys](#privacy--api-keys) below. There is no backend.
+Your API keys stay in your browser. See [Privacy & API keys](#privacy--api-keys). Completions go straight to the provider. An optional, opt-in **Speed Index** can store **anonymized metrics only** (never keys or auth headers). Design: [wiki/Home.md](wiki/Home.md).
 
 ## About
 
@@ -23,18 +23,26 @@ LLM Speed Test runs three fixed scenarios (a bug triage, a doc summary, a small 
 
 ## Privacy & API keys
 
-This app is **client-only**. We do not operate a server that receives or stores your API keys.
+This app keeps **API keys in your browser**. We do not store them in Neon, in Netlify logs, or in the downloadable request log.
 
 | What | Where |
 | --- | --- |
 | **API keys** | Your browser’s `localStorage`, key `llm-speed-bench:v1`, inside each endpoint’s `apiKey` field |
 | **Who can read them** | Only scripts on this origin in your browser (you, on this device) |
-| **Who cannot** | Netlify (static hosting only), this repo’s authors, other users |
-| **When keys are used** | On “Run benchmark”, your browser sends them directly to the provider (e.g. OpenRouter) as `Authorization: Bearer …` |
+| **Who cannot** | Neon, Netlify function logs, other users, downloadable logs |
+| **When keys are used** | On “Run benchmark”, your browser sends them **directly to the provider** as `Authorization` / `x-api-key` |
 | **Export JSON** | Keys are **not** included — only `apiKeySet: true/false` |
+| **Downloadable log** | Headers and key-like strings are replaced with `[redacted]` (no prefix/suffix leftovers) |
+| **Speed Index (opt-in)** | Model, provider **host**, task, country, and timing numbers only. See [wiki/Privacy.md](wiki/Privacy.md) |
 | **If you switch browser / clear site data** | Keys are gone until you paste them again |
 
 The live site explains this in the UI banner and next to each API key field.
+
+## Speed Index
+
+The old “average overall tok/s” across every model in a run was meaningless. The bench now compares **per model on each provider**. The public index (wiki: [Speed Index](wiki/Speed-Index.md)) uses the same idea and also splits by **task** and **geography**.
+
+Neon holds the opt-in fact table. The browser never gets `DATABASE_URL`. Setup: [wiki/Operations.md](wiki/Operations.md).
 
 ## Provider support & model discovery
 
