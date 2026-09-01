@@ -149,13 +149,13 @@ async function streamOpenAi(args: {
     const errText = await res.text().catch(() => '')
     logEntry.response.body = errText
     logEntry.level = 'error'
-    const message = `HTTP ${res.status} ${res.statusText} @ ${url} — ${errText.slice(0, 400) || '(empty body)'}`
+    const message = `The provider returned HTTP ${res.status} at ${url}: ${errText.slice(0, 400) || '(no response body)'}`
     logEntry.error = message
     throw Object.assign(new Error(message), { logEntry })
   }
 
   if (!res.body) {
-    const message = 'Response had no body (streaming unsupported by browser/proxy).'
+    const message = 'The provider sent no stream back. Streaming may be disabled for this endpoint.'
     logEntry.level = 'error'
     logEntry.error = message
     throw Object.assign(new Error(message), { logEntry })
@@ -305,13 +305,13 @@ async function streamAnthropic(args: {
     const errText = await res.text().catch(() => '')
     logEntry.response.body = errText
     logEntry.level = 'error'
-    const message = `HTTP ${res.status} ${res.statusText} @ ${url} — ${errText.slice(0, 400) || '(empty body)'}`
+    const message = `The provider returned HTTP ${res.status} at ${url}: ${errText.slice(0, 400) || '(no response body)'}`
     logEntry.error = message
     throw Object.assign(new Error(message), { logEntry })
   }
 
   if (!res.body) {
-    const message = 'Response had no body (streaming unsupported by browser/proxy).'
+    const message = 'The provider sent no stream back. Streaming may be disabled for this endpoint.'
     logEntry.level = 'error'
     logEntry.error = message
     throw Object.assign(new Error(message), { logEntry })
@@ -480,13 +480,10 @@ export async function runStreamBench(
     if (!logEntry.error) {
       logEntry.level = 'error'
       logEntry.error = looksLikeCorsError(error)
-        ? `CORS/network block: the browser rejected the response from ${targetUrl} (likely "${rawMessage}"). ` +
-          `This provider's streaming endpoint doesn't allow direct browser calls ` +
-          `(it's built for server-side use). Options: (a) use OpenRouter, which ` +
-          `allows browser calls; (b) set a CORS proxy URL on this endpoint and ` +
-          `retry; (c) try the provider's OpenAI-compatible endpoint if it ` +
-          `allows CORS.`
-        : `Network/fetch error: ${rawMessage}`
+        ? `The browser couldn't read the stream from ${targetUrl} ("${rawMessage}"). ` +
+          `This usually means the provider blocks browser requests. Try OpenRouter, ` +
+          `add your own CORS proxy URL to this endpoint, or try its OpenAI-compatible URL.`
+        : `The request couldn't reach the provider: ${rawMessage}`
       logEntry.timing = { ttftMs: null, totalMs: performance.now() - t0 }
     }
     throw Object.assign(new Error(logEntry.error), { logEntry })

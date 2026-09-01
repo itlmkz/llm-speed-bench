@@ -17,7 +17,7 @@ export const TEST_PRESETS: TestPreset[] = [
   {
     id: 'debug',
     name: 'Debug triage',
-    description: 'Short bug report → concise root-cause guess and next step.',
+    description: 'A short bug report, followed by a likely cause and next step.',
     system:
       'You are a senior engineer. Be direct. Prefer a short structured answer.',
     user: `A React app intermittently shows a blank screen after client-side navigation.
@@ -29,7 +29,7 @@ Give: likely cause, how to confirm, and the smallest safe fix.`,
   {
     id: 'document',
     name: 'Document analysis',
-    description: 'Longer context → extract decisions and risks.',
+    description: 'A longer document, boiled down to decisions and risks.',
     system:
       'You analyze product/engineering documents. Extract decisions, risks, and actions.',
     user: `${SAMPLE_DOC}
@@ -43,7 +43,7 @@ Summarize:
   {
     id: 'coding',
     name: 'Coding task',
-    description: 'Implement a small utility with constraints.',
+    description: 'A small utility to implement, with a few clear constraints.',
     system: 'You write clear TypeScript. Prefer correctness and readability.',
     user: `Write a TypeScript function \`measureDecodeTokPerSec\` that takes:
 - completionTokens: number

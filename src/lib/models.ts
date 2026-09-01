@@ -70,23 +70,23 @@ function friendlyMessage(
 ): string {
   switch (kind) {
     case 'invalid_url':
-      return `This URL doesn't look like a real AI API endpoint. ${detail}`.trim()
+      return `That URL doesn't look like an AI API endpoint. ${detail}`.trim()
     case 'missing_key':
-      return 'No API key set for this endpoint — add one to fetch models.'
+      return 'Add an API key for this endpoint, then fetch the models again.'
     case 'unauthorized':
-      return `Rejected (HTTP ${status}). The API key is wrong, expired, or lacks permission for this endpoint.`
+      return `The provider rejected the key (HTTP ${status}). Check that it is correct, active, and allowed to use this endpoint.`
     case 'not_found':
-      return `Not found (HTTP 404) at ${url}. The base URL is wrong, or this provider doesn't expose /models.`
+      return `We couldn't find a models endpoint at ${url} (HTTP 404). Check the base URL, or use a provider that exposes /models.`
     case 'timeout':
-      return `Timed out after ${FETCH_TIMEOUT_MS / 1000}s. The URL may be unreachable, or the key/URL combo is wrong.`
+      return `The model list took longer than ${FETCH_TIMEOUT_MS / 1000}s. The URL may be unreachable, or the key and URL may not belong together.`
     case 'network':
       return detail.includes('CORS') || detail.includes('blocked')
         ? detail
-        : `Network error: ${detail}. Often a CORS block, an unreachable host, or an invalid URL.`
+        : `The browser couldn't reach that endpoint: ${detail}. This is often CORS, an unreachable host, or a bad URL.`
     case 'parse':
-      return `Got a response but couldn't read a model list from it. ${detail}`.trim()
+      return `The endpoint replied, but not with a model list. ${detail}`.trim()
     case 'other':
-      return `HTTP ${status}: ${detail.slice(0, 300) || '(empty body)'}`
+      return `The provider returned HTTP ${status}: ${detail.slice(0, 300) || '(no response body)'}`
     case 'ok':
       return ''
     default: {

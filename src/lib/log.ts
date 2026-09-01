@@ -57,7 +57,7 @@ export function downloadLogs(entries: LogEntry[]): void {
     lines.push(`  Base URL:   ${entry.baseUrl}`)
     lines.push(`  Slug:       ${entry.slug}`)
     lines.push('')
-    lines.push('  REQUEST:')
+    lines.push('  REQUEST SENT:')
     lines.push(`    ${entry.request.method} ${entry.request.url}`)
     for (const [k, v] of Object.entries(entry.request.headers)) {
       lines.push(`    ${k}: ${v}`)
@@ -71,7 +71,7 @@ export function downloadLogs(entries: LogEntry[]): void {
     )
     lines.push('')
     if (entry.response) {
-      lines.push('  RESPONSE:')
+      lines.push('  RESPONSE RECEIVED:')
       lines.push(`    HTTP ${entry.response.status} ${entry.response.statusText}`)
       for (const [k, v] of Object.entries(entry.response.headers)) {
         lines.push(`    ${k}: ${v}`)
@@ -93,7 +93,7 @@ export function downloadLogs(entries: LogEntry[]): void {
       lines.push('')
     }
     if (entry.error) {
-      lines.push('  ERROR:')
+      lines.push('  WHAT WENT WRONG:')
       lines.push(`    ${entry.error}`)
       lines.push('')
     }
@@ -103,7 +103,7 @@ export function downloadLogs(entries: LogEntry[]): void {
 
   lines.push('')
   lines.push('='.repeat(72))
-  lines.push('RAW JSON (for sharing):')
+  lines.push('RAW JSON (handy when sharing this log):')
   lines.push('='.repeat(72))
   lines.push(JSON.stringify(entries, null, 2))
 
