@@ -1,6 +1,6 @@
 import { BRAND } from '../lib/brand'
 
-export type View = 'bench' | 'about'
+export type View = 'bench' | 'index' | 'about'
 
 export function SiteHeader({
   view,
@@ -35,6 +35,7 @@ export function SiteHeader({
           {(
             [
               { id: 'bench', label: 'Benchmark' },
+              { id: 'index', label: 'Speed index' },
               { id: 'about', label: 'About' },
             ] as { id: View; label: string }[]
           ).map((tab) => {
@@ -61,8 +62,9 @@ export function SiteHeader({
         {BRAND.siteTagline}
       </h1>
       <p className="max-w-2xl text-base text-muted">
-        Add your endpoints, pick the models, hit run. Your keys, your browser,
-        no backend.
+        Add your endpoints, pick the models, hit run. Keys stay in your
+        browser. Compare speed per model and provider — never as one blended
+        average.
       </p>
     </header>
   )

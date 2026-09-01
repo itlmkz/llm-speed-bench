@@ -31,6 +31,15 @@ export function AboutSection() {
           >
             See the code on GitHub
           </a>
+          {' · '}
+          <a
+            href={BRAND.wikiUrl}
+            className="text-accent underline-offset-4 hover:underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Speed Index wiki
+          </a>
         </p>
       </Card.Content>
     </Card>
