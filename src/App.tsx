@@ -1,4 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Button,
+  Card,
+  Chip,
+  Input,
+  Label,
+  ListBox,
+  Select,
+  Spinner,
+  TextField,
+} from '@heroui/react'
+import { EmptyState } from '@heroui-pro/react/empty-state'
+import { ItemCard } from '@heroui-pro/react/item-card'
+import { KPI } from '@heroui-pro/react/kpi'
 import { runStreamBench } from './lib/bench'
 import { formatMs, formatTokPerSec, formatTokens } from './lib/format'
 import { TEST_PRESETS, presetById } from './lib/presets'
@@ -12,6 +26,7 @@ import {
 import type {
   AppConfig,
   BenchResult,
+  BenchStatus,
   EndpointConfig,
   ModelTarget,
   TestPresetId,
@@ -19,6 +34,25 @@ import type {
 
 function resultKey(presetId: string, modelId: string): string {
   return `${presetId}::${modelId}`
+}
+
+function statusColor(
+  status: BenchStatus,
+): 'accent' | 'success' | 'danger' | 'warning' | 'default' {
+  switch (status) {
+    case 'ok':
+      return 'success'
+    case 'error':
+      return 'danger'
+    case 'running':
+      return 'warning'
+    case 'pending':
+      return 'default'
+    default: {
+      const _exhaustive: never = status
+      return _exhaustive
+    }
+  }
 }
 
 export default function App() {
@@ -40,46 +74,70 @@ export default function App() {
 
   const endpointMap = useMemo(() => {
     const map = new Map<string, EndpointConfig>()
-    for (const e of config.endpoints) map.set(e.id, e)
+    for (const endpoint of config.endpoints) map.set(endpoint.id, endpoint)
     return map
   }, [config.endpoints])
 
+  const summary = useMemo(() => {
+    const ok = results.filter((row) => row.status === 'ok' && row.metrics)
+    if (!ok.length) return null
+    const avg = (
+      pick: (metrics: NonNullable<BenchResult['metrics']>) => number | null,
+    ) => {
+      const values = ok
+        .map((row) => pick(row.metrics!))
+        .filter((value): value is number => value != null && !Number.isNaN(value))
+      if (!values.length) return null
+      return values.reduce((a, b) => a + b, 0) / values.length
+    }
+    return {
+      decode: avg((metrics) => metrics.decodeTokPerSec),
+      overall: avg((metrics) => metrics.overallTokPerSec),
+      ttft: avg((metrics) => metrics.ttftMs),
+      okCount: ok.length,
+    }
+  }, [results])
+
   const updateEndpoint = (id: string, patch: Partial<EndpointConfig>) => {
-    setConfig((c) => ({
-      ...c,
-      endpoints: c.endpoints.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    setConfig((current) => ({
+      ...current,
+      endpoints: current.endpoints.map((endpoint) =>
+        endpoint.id === id ? { ...endpoint, ...patch } : endpoint,
+      ),
     }))
   }
 
   const removeEndpoint = (id: string) => {
-    setConfig((c) => ({
-      ...c,
-      endpoints: c.endpoints.filter((e) => e.id !== id),
-      models: c.models.filter((m) => m.endpointId !== id),
+    setConfig((current) => ({
+      ...current,
+      endpoints: current.endpoints.filter((endpoint) => endpoint.id !== id),
+      models: current.models.filter((model) => model.endpointId !== id),
     }))
   }
 
   const updateModel = (id: string, patch: Partial<ModelTarget>) => {
-    setConfig((c) => ({
-      ...c,
-      models: c.models.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+    setConfig((current) => ({
+      ...current,
+      models: current.models.map((model) =>
+        model.id === id ? { ...model, ...patch } : model,
+      ),
     }))
   }
 
   const removeModel = (id: string) => {
-    setConfig((c) => ({
-      ...c,
-      models: c.models.filter((m) => m.id !== id),
+    setConfig((current) => ({
+      ...current,
+      models: current.models.filter((model) => model.id !== id),
     }))
   }
 
   const togglePreset = (id: TestPresetId) => {
-    setConfig((c) => {
-      const has = c.selectedPresets.includes(id)
-      const selectedPresets = has
-        ? c.selectedPresets.filter((p) => p !== id)
-        : [...c.selectedPresets, id]
-      return { ...c, selectedPresets }
+    setConfig((current) => {
+      const selected = current.selectedPresets.includes(id)
+      const selectedPresets = selected
+        ? current.selectedPresets.filter((presetId) => presetId !== id)
+        : [...current.selectedPresets, id]
+      return { ...current, selectedPresets }
     })
   }
 
@@ -93,13 +151,13 @@ export default function App() {
     const presets = config.selectedPresets
       .map((id) => presetById(id))
       .filter(Boolean)
-    const models = config.models.filter((m) => m.slug.trim())
+    const models = config.models.filter((model) => model.slug.trim())
 
     if (!presets.length || !models.length) return
 
     abortRef.current?.abort()
-    const ac = new AbortController()
-    abortRef.current = ac
+    const controller = new AbortController()
+    abortRef.current = controller
     setRunning(true)
 
     const initial: BenchResult[] = []
@@ -121,44 +179,47 @@ export default function App() {
     }
     setResults(initial)
 
-    // Run sequentially so rates stay comparable and providers are not hammered.
     for (const row of initial) {
-      if (ac.signal.aborted) break
+      if (controller.signal.aborted) break
       const preset = presetById(row.presetId)
       const endpoint = endpointMap.get(row.endpointId)
       if (!preset || !endpoint) continue
 
-      setResults((prev) =>
-        prev.map((r) =>
-          r.key === row.key ? { ...r, status: 'running', error: undefined } : r,
+      setResults((current) =>
+        current.map((result) =>
+          result.key === row.key
+            ? { ...result, status: 'running', error: undefined }
+            : result,
         ),
       )
 
       try {
-        const out = await runStreamBench({
+        const output = await runStreamBench({
           endpoint,
           slug: row.slug,
           preset,
-          signal: ac.signal,
+          signal: controller.signal,
         })
-        setResults((prev) =>
-          prev.map((r) =>
-            r.key === row.key
+        setResults((current) =>
+          current.map((result) =>
+            result.key === row.key
               ? {
-                  ...r,
+                  ...result,
                   status: 'ok',
-                  metrics: out.metrics,
-                  preview: out.preview,
+                  metrics: output.metrics,
+                  preview: output.preview,
                 }
-              : r,
+              : result,
           ),
         )
-      } catch (err) {
-        if (ac.signal.aborted) break
-        const message = err instanceof Error ? err.message : String(err)
-        setResults((prev) =>
-          prev.map((r) =>
-            r.key === row.key ? { ...r, status: 'error', error: message } : r,
+      } catch (error) {
+        if (controller.signal.aborted) break
+        const message = error instanceof Error ? error.message : String(error)
+        setResults((current) =>
+          current.map((result) =>
+            result.key === row.key
+              ? { ...result, status: 'error', error: message }
+              : result,
           ),
         )
       }
@@ -191,275 +252,399 @@ export default function App() {
       { type: 'application/json' },
     )
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `llm-speed-bench-${Date.now()}.json`
-    a.click()
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `llm-speed-bench-${Date.now()}.json`
+    anchor.click()
     URL.revokeObjectURL(url)
   }
 
   return (
-    <div className="app">
-      <header className="hero">
-        <h1 className="brand">
-          LLM Speed <span>Bench</span>
+    <div className="page flex flex-col gap-6">
+      <header className="flex flex-col gap-3 pt-2">
+        <p className="text-sm font-medium tracking-wide text-accent uppercase">
+          LLM Speed Bench
+        </p>
+        <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+          Measure real streaming speed across OpenAI-compatible APIs
         </h1>
-        <p className="lede">
-          Measure real streaming speed across OpenAI-compatible APIs. Add one or
-          more base URLs, attach model slugs, pick a scenario, and run. Keys stay
-          in your browser.
+        <p className="max-w-2xl text-base text-muted">
+          Add base URLs, attach model slugs, pick scenarios, then run. Keys stay
+          in your browser — there is no backend.
         </p>
       </header>
 
-      <section className="panel">
-        <h2>Endpoints</h2>
-        <div className="stack">
-          {config.endpoints.map((e) => (
-            <div className="row endpoint" key={e.id}>
-              <label>
-                Label
-                <input
-                  value={e.label}
-                  onChange={(ev) =>
-                    updateEndpoint(e.id, { label: ev.target.value })
-                  }
-                  placeholder="OpenRouter"
-                />
-              </label>
-              <label>
-                Base URL
-                <input
-                  value={e.baseUrl}
-                  onChange={(ev) =>
-                    updateEndpoint(e.id, { baseUrl: ev.target.value })
-                  }
+      <Card>
+        <Card.Header>
+          <Card.Title>Endpoints</Card.Title>
+          <Card.Description>
+            OpenRouter, xAI/Grok, OpenAI, Groq, Ollama, or any OpenAI-compatible
+            base URL.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content className="flex flex-col gap-4">
+          {config.endpoints.map((endpoint) => (
+            <div
+              key={endpoint.id}
+              className="grid gap-3 rounded-2xl border border-border bg-surface/70 p-4 md:grid-cols-[1fr_1.4fr_1.3fr_auto] md:items-end"
+            >
+              <TextField
+                aria-label="Endpoint label"
+                value={endpoint.label}
+                onChange={(value) => updateEndpoint(endpoint.id, { label: value })}
+              >
+                <Label>Label</Label>
+                <Input placeholder="OpenRouter" />
+              </TextField>
+              <TextField
+                aria-label="Base URL"
+                value={endpoint.baseUrl}
+                onChange={(value) =>
+                  updateEndpoint(endpoint.id, { baseUrl: value })
+                }
+              >
+                <Label>Base URL</Label>
+                <Input
+                  className="font-mono text-sm"
                   placeholder="https://openrouter.ai/api/v1"
                   spellCheck={false}
                 />
-              </label>
-              <label>
-                API key
-                <input
-                  type="password"
-                  value={e.apiKey}
-                  onChange={(ev) =>
-                    updateEndpoint(e.id, { apiKey: ev.target.value })
-                  }
-                  placeholder="sk-…"
-                  autoComplete="off"
-                />
-              </label>
-              <div className="actions">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-danger"
-                  onClick={() => removeEndpoint(e.id)}
-                  disabled={config.endpoints.length <= 1}
-                >
-                  Remove
-                </button>
-              </div>
+              </TextField>
+              <TextField
+                aria-label="API key"
+                type="password"
+                value={endpoint.apiKey}
+                onChange={(value) =>
+                  updateEndpoint(endpoint.id, { apiKey: value })
+                }
+              >
+                <Label>API key</Label>
+                <Input placeholder="sk-…" autoComplete="off" />
+              </TextField>
+              <Button
+                variant="ghost"
+                className="text-danger"
+                isDisabled={config.endpoints.length <= 1}
+                onPress={() => removeEndpoint(endpoint.id)}
+              >
+                Remove
+              </Button>
             </div>
           ))}
-        </div>
-        <div className="actions" style={{ marginTop: '0.85rem' }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() =>
-              setConfig((c) => ({
-                ...c,
-                endpoints: [...c.endpoints, newEndpoint()],
+        </Card.Content>
+        <Card.Footer>
+          <Button
+            variant="secondary"
+            onPress={() =>
+              setConfig((current) => ({
+                ...current,
+                endpoints: [...current.endpoints, newEndpoint()],
               }))
             }
           >
             Add URL
-          </button>
-        </div>
-      </section>
+          </Button>
+        </Card.Footer>
+      </Card>
 
-      <section className="panel">
-        <h2>Model slugs</h2>
-        <div className="stack">
-          {config.models.map((m) => (
-            <div className="row model" key={m.id}>
-              <label>
-                Endpoint
-                <select
-                  value={m.endpointId}
-                  onChange={(ev) =>
-                    updateModel(m.id, { endpointId: ev.target.value })
-                  }
-                >
-                  {config.endpoints.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Slug
-                <input
-                  value={m.slug}
-                  onChange={(ev) => updateModel(m.id, { slug: ev.target.value })}
+      <Card>
+        <Card.Header>
+          <Card.Title>Model slugs</Card.Title>
+          <Card.Description>
+            Pair each slug with an endpoint. Run several models in one pass.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content className="flex flex-col gap-4">
+          {config.models.map((model) => (
+            <div
+              key={model.id}
+              className="grid gap-3 rounded-2xl border border-border bg-surface/70 p-4 md:grid-cols-[1.2fr_2fr_auto] md:items-end"
+            >
+              <Select
+                aria-label="Endpoint"
+                selectedKey={model.endpointId}
+                onSelectionChange={(key) => {
+                  if (key == null) return
+                  updateModel(model.id, { endpointId: String(key) })
+                }}
+              >
+                <Label>Endpoint</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {config.endpoints.map((endpoint) => (
+                      <ListBox.Item
+                        key={endpoint.id}
+                        id={endpoint.id}
+                        textValue={endpoint.label}
+                      >
+                        {endpoint.label}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+              <TextField
+                aria-label="Model slug"
+                value={model.slug}
+                onChange={(value) => updateModel(model.id, { slug: value })}
+              >
+                <Label>Slug</Label>
+                <Input
+                  className="font-mono text-sm"
                   placeholder="openai/gpt-4o-mini"
                   spellCheck={false}
                 />
-              </label>
-              <div className="actions">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-danger"
-                  onClick={() => removeModel(m.id)}
-                >
-                  Remove
-                </button>
-              </div>
+              </TextField>
+              <Button
+                variant="ghost"
+                className="text-danger"
+                onPress={() => removeModel(model.id)}
+              >
+                Remove
+              </Button>
             </div>
           ))}
-        </div>
-        <div className="actions" style={{ marginTop: '0.85rem' }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() =>
-              setConfig((c) => ({
-                ...c,
+        </Card.Content>
+        <Card.Footer>
+          <Button
+            variant="secondary"
+            onPress={() =>
+              setConfig((current) => ({
+                ...current,
                 models: [
-                  ...c.models,
-                  newModel(c.endpoints[0]?.id ?? '', ''),
+                  ...current.models,
+                  newModel(current.endpoints[0]?.id ?? '', ''),
                 ],
               }))
             }
           >
             Add slug
-          </button>
-        </div>
-      </section>
+          </Button>
+        </Card.Footer>
+      </Card>
 
-      <section className="panel">
-        <h2>Test scenarios</h2>
-        <div className="presets">
-          {TEST_PRESETS.map((p) => {
-            const active = config.selectedPresets.includes(p.id)
-            return (
-              <button
-                key={p.id}
-                type="button"
-                className={`preset${active ? ' active' : ''}`}
-                onClick={() => togglePreset(p.id)}
-                aria-pressed={active}
-              >
-                <strong>{p.name}</strong>
-                <p>{p.description}</p>
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="runbar">
-          <p className="hint">
-            Metrics: TTFT, total time, decode tok/s (after first token), overall
-            tok/s. Runs sequentially for fairer timing.
+      <Card>
+        <Card.Header>
+          <Card.Title>Test scenarios</Card.Title>
+          <Card.Description>
+            Fixed prompts so latency and tokens/sec stay comparable across
+            models.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content>
+          <div className="grid gap-3 md:grid-cols-3">
+            {TEST_PRESETS.map((preset) => {
+              const active = config.selectedPresets.includes(preset.id)
+              return (
+                <ItemCard
+                  key={preset.id}
+                  variant={active ? 'secondary' : 'default'}
+                  className={
+                    active
+                      ? 'cursor-pointer border-accent ring-2 ring-accent/25'
+                      : 'cursor-pointer'
+                  }
+                  onClick={() => togglePreset(preset.id)}
+                >
+                  <ItemCard.Content>
+                    <ItemCard.Title>{preset.name}</ItemCard.Title>
+                    <ItemCard.Description>
+                      {preset.description}
+                    </ItemCard.Description>
+                  </ItemCard.Content>
+                  <ItemCard.Action>
+                    <Chip
+                      color={active ? 'accent' : 'default'}
+                      variant="soft"
+                      size="sm"
+                    >
+                      <Chip.Label>{active ? 'On' : 'Off'}</Chip.Label>
+                    </Chip>
+                  </ItemCard.Action>
+                </ItemCard>
+              )
+            })}
+          </div>
+        </Card.Content>
+        <Card.Footer className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">
+            Metrics: TTFT, total time, decode tok/s, overall tok/s. Runs
+            sequentially.
           </p>
-          <div className="actions">
+          <div className="flex gap-2">
             {running ? (
-              <button type="button" className="btn" onClick={stop}>
+              <Button variant="secondary" onPress={stop}>
                 Stop
-              </button>
+              </Button>
             ) : null}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={runAll}
-              disabled={
+            <Button
+              variant="primary"
+              isDisabled={
                 running ||
                 !config.selectedPresets.length ||
-                !config.models.some((m) => m.slug.trim())
+                !config.models.some((model) => model.slug.trim())
               }
+              onPress={() => {
+                void runAll()
+              }}
             >
-              {running ? 'Running…' : 'Run benchmark'}
-            </button>
+              {running ? (
+                <>
+                  <Spinner size="sm" color="current" />
+                  Running…
+                </>
+              ) : (
+                'Run benchmark'
+              )}
+            </Button>
           </div>
-        </div>
-      </section>
+        </Card.Footer>
+      </Card>
 
-      <section className="panel">
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            alignItems: 'center',
-            marginBottom: '0.5rem',
-          }}
-        >
-          <h2 style={{ margin: 0 }}>Results</h2>
-          <button
-            type="button"
-            className="btn"
-            onClick={exportJson}
-            disabled={!results.length}
+      {summary ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Avg decode tok/s</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <p className="mono text-3xl font-semibold text-foreground">
+                {formatTokPerSec(summary.decode)}
+              </p>
+            </KPI.Content>
+          </KPI>
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Avg overall tok/s</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <p className="mono text-3xl font-semibold text-foreground">
+                {formatTokPerSec(summary.overall)}
+              </p>
+            </KPI.Content>
+          </KPI>
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Avg TTFT</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <p className="mono text-3xl font-semibold text-foreground">
+                {formatMs(summary.ttft)}
+              </p>
+            </KPI.Content>
+          </KPI>
+          <KPI>
+            <KPI.Header>
+              <KPI.Title>Successful runs</KPI.Title>
+            </KPI.Header>
+            <KPI.Content>
+              <KPI.Value className="mono" value={summary.okCount} />
+            </KPI.Content>
+          </KPI>
+        </div>
+      ) : null}
+
+      <Card>
+        <Card.Header className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <Card.Title>Results</Card.Title>
+            <Card.Description>
+              Per-run TTFT, total latency, and tokens/sec.
+            </Card.Description>
+          </div>
+          <Button
+            variant="secondary"
+            isDisabled={!results.length}
+            onPress={exportJson}
           >
             Export JSON
-          </button>
-        </div>
-
-        {!results.length ? (
-          <p className="empty">No runs yet. Configure endpoints and click Run.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Status</th>
-                  <th>Scenario</th>
-                  <th>Endpoint</th>
-                  <th>Model</th>
-                  <th className="mono">TTFT</th>
-                  <th className="mono">Total</th>
-                  <th className="mono">Decode tok/s</th>
-                  <th className="mono">Overall tok/s</th>
-                  <th className="mono">Out tokens</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r) => (
-                  <tr key={r.key}>
-                    <td>
-                      <span className={`badge ${r.status}`}>{r.status}</span>
-                      {r.error ? (
-                        <div className="error-text">{r.error}</div>
-                      ) : null}
-                    </td>
-                    <td>{presetById(r.presetId)?.name ?? r.presetId}</td>
-                    <td>{r.endpointLabel}</td>
-                    <td className="slug">{r.slug}</td>
-                    <td className="mono">{formatMs(r.metrics?.ttftMs)}</td>
-                    <td className="mono">{formatMs(r.metrics?.totalMs)}</td>
-                    <td className="metric-hi">
-                      {formatTokPerSec(r.metrics?.decodeTokPerSec)}
-                    </td>
-                    <td className="mono">
-                      {formatTokPerSec(r.metrics?.overallTokPerSec)}
-                    </td>
-                    <td className="mono">
-                      {formatTokens(r.metrics?.completionTokens)}
-                      {r.metrics?.tokenSource === 'estimated' ? '≈' : ''}
-                    </td>
+          </Button>
+        </Card.Header>
+        <Card.Content>
+          {!results.length ? (
+            <EmptyState className="py-10">
+              <EmptyState.Header>
+                <EmptyState.Title>No runs yet</EmptyState.Title>
+                <EmptyState.Description>
+                  Configure endpoints and slugs, pick scenarios, then click Run
+                  benchmark.
+                </EmptyState.Description>
+              </EmptyState.Header>
+            </EmptyState>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs tracking-wide text-muted uppercase">
+                    <th className="px-2 py-3 font-medium">Status</th>
+                    <th className="px-2 py-3 font-medium">Scenario</th>
+                    <th className="px-2 py-3 font-medium">Endpoint</th>
+                    <th className="px-2 py-3 font-medium">Model</th>
+                    <th className="mono px-2 py-3 font-medium">TTFT</th>
+                    <th className="mono px-2 py-3 font-medium">Total</th>
+                    <th className="mono px-2 py-3 font-medium">Decode tok/s</th>
+                    <th className="mono px-2 py-3 font-medium">Overall tok/s</th>
+                    <th className="mono px-2 py-3 font-medium">Out tokens</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {results.map((result) => (
+                    <tr
+                      key={result.key}
+                      className="border-b border-border/70 align-top"
+                    >
+                      <td className="px-2 py-3">
+                        <Chip
+                          color={statusColor(result.status)}
+                          variant="soft"
+                          size="sm"
+                        >
+                          <Chip.Label>{result.status}</Chip.Label>
+                        </Chip>
+                        {result.error ? (
+                          <p className="mt-1 max-w-[14rem] text-xs whitespace-pre-wrap text-danger">
+                            {result.error}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-3">
+                        {presetById(result.presetId)?.name ?? result.presetId}
+                      </td>
+                      <td className="px-2 py-3">{result.endpointLabel}</td>
+                      <td className="mono px-2 py-3 text-xs">{result.slug}</td>
+                      <td className="mono px-2 py-3">
+                        {formatMs(result.metrics?.ttftMs)}
+                      </td>
+                      <td className="mono px-2 py-3">
+                        {formatMs(result.metrics?.totalMs)}
+                      </td>
+                      <td className="mono px-2 py-3 font-semibold text-accent">
+                        {formatTokPerSec(result.metrics?.decodeTokPerSec)}
+                      </td>
+                      <td className="mono px-2 py-3">
+                        {formatTokPerSec(result.metrics?.overallTokPerSec)}
+                      </td>
+                      <td className="mono px-2 py-3">
+                        {formatTokens(result.metrics?.completionTokens)}
+                        {result.metrics?.tokenSource === 'estimated' ? '≈' : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card.Content>
+      </Card>
 
-      <footer className="footer">
-        Client-only. Requests go from your browser to each API. Works with
-        OpenRouter, xAI/Grok, OpenAI, Groq, Ollama, and other OpenAI-compatible
-        chat completions endpoints. CORS must allow browser calls.
+      <footer className="text-sm text-muted">
+        Built with HeroUI Pro (Mouve light). Requests go from your browser to
+        each API. CORS must allow browser calls.
       </footer>
     </div>
   )
