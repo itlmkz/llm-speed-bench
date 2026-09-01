@@ -1,5 +1,12 @@
 import type { BenchMetrics, EndpointConfig, TestPreset } from './types'
+import {
+  classifyBenchError,
+  classifyHttpError,
+  friendlyHttpError,
+  type ErrorKind,
+} from './errors'
 import { redactHeaders, type LogEntry } from './log'
+import { redactDeep, redactSecretsInString, redactUrl } from './sanitize'
 import {
   applyProxy,
   authHeaders,
@@ -67,6 +74,35 @@ function headersToObject(headers: Headers): Record<string, string> {
   return out
 }
 
+function recordResponseMeta(logEntry: LogEntry, res: Response): void {
+  logEntry.response = {
+    status: res.status,
+    statusText: res.statusText,
+    headers: redactHeaders(headersToObject(res.headers)),
+    body: '',
+  }
+}
+
+function throwIfHttpError(
+  logEntry: LogEntry,
+  res: Response,
+  url: string,
+  errText: string,
+): void {
+  if (res.ok) return
+  if (logEntry.response) {
+    logEntry.response.body = redactSecretsInString(errText)
+  }
+  logEntry.level = 'error'
+  const message = friendlyHttpError(res.status, url, errText)
+  logEntry.error = message
+  throw Object.assign(new Error(message), {
+    logEntry,
+    httpStatus: res.status,
+    errorKind: classifyHttpError(res.status, errText),
+  })
+}
+
 function newLogEntry(
   endpoint: EndpointConfig,
   url: string,
@@ -90,9 +126,9 @@ function newLogEntry(
     slug,
     request: {
       method,
-      url,
+      url: redactUrl(url),
       headers: redactHeaders(headers),
-      body,
+      body: redactDeep(body),
     },
   }
 }
@@ -138,20 +174,10 @@ async function streamOpenAi(args: {
     signal,
   })
 
-  logEntry.response = {
-    status: res.status,
-    statusText: res.statusText,
-    headers: headersToObject(res.headers),
-    body: '',
-  }
-
+  recordResponseMeta(logEntry, res)
   if (!res.ok) {
     const errText = await res.text().catch(() => '')
-    logEntry.response.body = errText
-    logEntry.level = 'error'
-    const message = `The provider returned HTTP ${res.status} at ${url}: ${errText.slice(0, 400) || '(no response body)'}`
-    logEntry.error = message
-    throw Object.assign(new Error(message), { logEntry })
+    throwIfHttpError(logEntry, res, url, errText)
   }
 
   if (!res.body) {
@@ -241,7 +267,11 @@ async function streamOpenAi(args: {
     tokenSource = 'estimated'
   }
 
-  logEntry.response.body = rawChunks || '(stream produced no data lines)'
+  if (logEntry.response) {
+    logEntry.response.body = redactSecretsInString(
+      rawChunks || '(stream produced no data lines)',
+    )
+  }
   logEntry.timing = { ttftMs, totalMs }
 
   return {
@@ -294,20 +324,10 @@ async function streamAnthropic(args: {
     signal,
   })
 
-  logEntry.response = {
-    status: res.status,
-    statusText: res.statusText,
-    headers: headersToObject(res.headers),
-    body: '',
-  }
-
+  recordResponseMeta(logEntry, res)
   if (!res.ok) {
     const errText = await res.text().catch(() => '')
-    logEntry.response.body = errText
-    logEntry.level = 'error'
-    const message = `The provider returned HTTP ${res.status} at ${url}: ${errText.slice(0, 400) || '(no response body)'}`
-    logEntry.error = message
-    throw Object.assign(new Error(message), { logEntry })
+    throwIfHttpError(logEntry, res, url, errText)
   }
 
   if (!res.body) {
@@ -402,7 +422,11 @@ async function streamAnthropic(args: {
     tokenSource = 'estimated'
   }
 
-  logEntry.response.body = rawChunks || '(stream produced no events)'
+  if (logEntry.response) {
+    logEntry.response.body = redactSecretsInString(
+      rawChunks || '(stream produced no events)',
+    )
+  }
   logEntry.timing = { ttftMs, totalMs }
 
   return {
@@ -477,6 +501,17 @@ export async function runStreamBench(
   } catch (error) {
     if (signal?.aborted) throw error
     const rawMessage = error instanceof Error ? error.message : String(error)
+    const httpStatus =
+      typeof (error as { httpStatus?: number }).httpStatus === 'number'
+        ? (error as { httpStatus: number }).httpStatus
+        : (logEntry.response?.status ?? null)
+    const errorKind: ErrorKind =
+      (error as { errorKind?: ErrorKind }).errorKind ??
+      classifyBenchError({
+        message: rawMessage,
+        httpStatus,
+        cors: looksLikeCorsError(error),
+      })
     if (!logEntry.error) {
       logEntry.level = 'error'
       logEntry.error = looksLikeCorsError(error)
@@ -486,6 +521,11 @@ export async function runStreamBench(
         : `The request couldn't reach the provider: ${rawMessage}`
       logEntry.timing = { ttftMs: null, totalMs: performance.now() - t0 }
     }
-    throw Object.assign(new Error(logEntry.error), { logEntry })
+    logEntry.error = redactSecretsInString(logEntry.error)
+    throw Object.assign(new Error(logEntry.error), {
+      logEntry,
+      httpStatus,
+      errorKind,
+    })
   }
 }
