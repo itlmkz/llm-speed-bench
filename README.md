@@ -2,14 +2,14 @@
 
 **By [Manuel Milliery](https://llm-speed-test.milliery.com) · Milliery**
 
-Browser tool to measure **real streaming speed** of OpenAI-compatible LLM APIs — not the cherry-picked numbers on a provider slide deck.
+A browser tool for measuring **real streaming speed** from OpenAI-compatible and Anthropic APIs. No cherry-picked slide-deck numbers.
 
 **Live:** https://llm-speed-test.milliery.com  
 **Also:** https://llm-speed-bench.netlify.app (Netlify default URL until DNS is pointed)
 
-Add one or more base URLs (OpenRouter, xAI/Grok, OpenAI, Groq, Ollama, …), attach model slugs, pick scenarios, click **Run benchmark**.
+Add an endpoint, choose a model, pick a scenario, and hit **Run benchmark**.
 
-API keys stay in your browser only — see [Privacy & API keys](#privacy--api-keys) below. There is no backend.
+Your API keys stay in your browser. See [Privacy & API keys](#privacy--api-keys) below. There is no backend.
 
 ## About
 
@@ -38,7 +38,7 @@ The live site explains this in the UI banner and next to each API key field.
 
 ## Provider support & model discovery
 
-The bench detects the provider from the base URL and uses the right wire format automatically:
+The bench reads the base URL and picks the right request format:
 
 - **Anthropic** (`api.anthropic.com`) → native Messages API (`/v1/messages`, `x-api-key`, `anthropic-version`, `anthropic-dangerous-direct-browser-access`), SSE events (`message_start`, `content_block_delta`, `message_delta`).
 - **OpenAI-compatible** (everything else: OpenRouter, xAI, OpenAI, Groq, Ollama, vLLM, …) → `/chat/completions` with `Authorization: Bearer`.
@@ -46,9 +46,9 @@ The bench detects the provider from the base URL and uses the right wire format 
 
 **URL validation:** base URLs that don’t look like a real AI API endpoint (non-http(s), no TLD, marketing/login paths) are flagged inline.
 
-**Automatic model fetcher:** each endpoint has a **Fetch models** button that calls the provider’s `/models` endpoint with your key and lists available slugs. The slug field becomes a combobox — pick from fetched models or type your own. Models auto-fetch once a valid URL + key are present.
+**Automatic model fetcher:** each endpoint has a **Fetch models** button. It calls `/models` with your key and fills the slug suggestions for you. You can still type your own slug. Models are fetched automatically once a valid URL and key are present.
 
-**Failure diagnostics:** if the model fetch times out, 404s, or errors, a plain-language message explains what’s wrong (wrong key, wrong URL, no `/models` endpoint, CORS, timeout) and the full request/response is added to the downloadable log.
+**Failure diagnostics:** if fetching models times out, returns a 404, or fails for another reason, you get a plain-language explanation (bad key, bad URL, missing `/models`, CORS, or timeout). The request and response are also saved in the downloadable log.
 
 ## Metrics
 
@@ -59,7 +59,7 @@ The bench detects the provider from the base URL and uses the right wire format 
 | **Decode tok/s** | `(completion_tokens − 1) / (total − TTFT)` — generation speed after the first token |
 | **Overall tok/s** | `completion_tokens / total` — end-to-end including prefill wait |
 
-Token counts prefer provider `usage` from the stream (`stream_options.include_usage`). If missing, output tokens are estimated from the text.
+When the provider reports usage in the stream (`stream_options.include_usage`), we use it. Otherwise, output tokens are estimated from the text.
 
 ## Test scenarios
 
@@ -67,7 +67,7 @@ Token counts prefer provider `usage` from the stream (`stream_options.include_us
 2. **Document analysis** — longer context → priorities / risks / actions  
 3. **Coding task** — small TypeScript utility  
 
-Toggle any combination, then run.
+Turn on the scenarios you want, then run the test.
 
 ## Quick start
 
@@ -79,7 +79,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL, paste API keys, edit slugs, click **Run benchmark**.
+Open the local URL, paste your keys, check the model slugs, and click **Run benchmark**.
 
 ```bash
 npm run build
@@ -97,30 +97,30 @@ Any static host works. Example Netlify:
   publish = "dist"
 ```
 
-Or GitHub Pages / Cloudflare Pages / Vercel — publish `dist`.
+GitHub Pages, Cloudflare Pages, and Vercel work too. Publish `dist`.
 
 **Live demo:** https://llm-speed-test.milliery.com
 
 ### Custom domain (milliery.com)
 
-Point a CNAME record for `llm-speed-test` to your Netlify site URL, then add the domain in Netlify → Domain management → Add domain alias.
+Point a CNAME record for `llm-speed-test` to your Netlify site URL. Then add the domain in Netlify → Domain management → Add domain alias.
 
 For Netlify builds from Git, set `HEROUI_AUTH_TOKEN` in the site’s build environment (Site settings → Environment variables, scope: Builds).
 
 ## Related tools
 
-Existing options (mostly CLI or different focus):
+There are other good tools, mostly focused on the command line or a different kind of benchmark:
 
 - [llm-latency-bench](https://pypi.org/project/llm-latency-bench/) — rigorous CLI percentiles (TTFT, ITL, cost)
 - [llm-gateway-bench](https://github.com/mnbplus/llm-gateway-bench) — CLI for gateways/providers
 - [llm-latency-checker](https://github.com/skcript/llm-latency-checker) — client dashboard with hour-of-day charts
 - [Artificial Analysis](https://artificialanalysis.ai/) — published industry speed tables (not your live keys)
 
-This project is a **portable, click-to-run** multi-URL / multi-slug speed bench with fixed scenario prompts — easy to fork and share.
+This project is a **portable, click-to-run** speed test for multiple URLs and model slugs, with the same prompts each time. It is easy to fork and share.
 
 ## CORS note
 
-The browser calls APIs directly. Providers that block browser origins (strict CORS) will fail here; use a provider that allows browser access (OpenRouter does) or run behind your own proxy.
+The browser calls APIs directly. Some providers block browser requests with strict CORS rules. Use a provider that allows browser calls (OpenRouter does), or put your own proxy in front of the endpoint.
 
 ## License
 
