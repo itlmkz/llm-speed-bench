@@ -159,6 +159,29 @@ export function normalizeBaseUrl(baseUrl: string): string {
 }
 
 /**
+ * Prefix a target request URL with an optional CORS proxy (cors-anywhere
+ * style: proxyUrl + targetUrl). Returns the target unchanged when no proxy.
+ */
+export function applyProxy(targetUrl: string, proxyUrl?: string): string {
+  if (!proxyUrl || !proxyUrl.trim()) return targetUrl
+  const proxy = proxyUrl.trim()
+  // If the proxy already ends with the target (re-applied), don't double-wrap.
+  if (targetUrl.startsWith(proxy)) return targetUrl
+  return `${proxy}${targetUrl}`
+}
+
+/**
+ * A browser fetch that throws with message "Failed to fetch" (TypeError) is
+ * almost always a CORS preflight/response block or an unreachable host — not
+ * a provider HTTP error. Returns true when the error matches that shape.
+ */
+export function looksLikeCorsError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  // Chrome/Edge/Firefox all surface CORS/network blocks as "Failed to fetch".
+  return /failed to fetch|networkerror|load failed/i.test(err.message)
+}
+
+/**
  * The /models endpoint for a given provider + base URL.
  * OpenAI-compatible: {base}/models  (or {base}/v1/models if base lacks /v1)
  * Anthropic:          {base}/v1/models  (api.anthropic.com base is /v1)

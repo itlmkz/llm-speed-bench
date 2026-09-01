@@ -7,6 +7,12 @@ export type EndpointConfig = {
   apiKey: string
   /** Optional explicit provider override; otherwise auto-detected from baseUrl. */
   provider?: ProviderType
+  /**
+   * Optional CORS proxy prefix. When set, request URLs are prefixed with this
+   * (cors-anywhere style: proxyUrl + targetUrl). Use when a provider blocks
+   * browser CORS on its streaming endpoint.
+   */
+  proxyUrl?: string
 }
 
 export type ModelTarget = {
