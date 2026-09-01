@@ -17,15 +17,32 @@ function hostOf(url: string): string | null {
   }
 }
 
+/** True for the real Anthropic API (api.anthropic.com). */
+export function isNativeAnthropic(baseUrl: string): boolean {
+  const host = hostOf(baseUrl)
+  return (
+    !!host && ANTHROPIC_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
+  )
+}
+
 export function detectProvider(baseUrl: string): ProviderType {
   const host = hostOf(baseUrl)
   if (!host) return 'unknown'
   if (ANTHROPIC_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) {
     return 'anthropic'
   }
-  // Anthropic-style keys are a strong secondary signal, but detection here is
-  // URL-only; the bench will also fall back to Anthropic format when the key
-  // prefix is sk-ant- and the host is anthropic.
+  // Third-party Anthropic-compatible proxies expose an `/anthropic` path
+  // segment (e.g. https://api.z.ai/api/anthropic, https://api.deepseek.com/anthropic).
+  try {
+    const u = new URL(baseUrl)
+    const segments = u.pathname
+      .toLowerCase()
+      .split('/')
+      .filter(Boolean)
+    if (segments.includes('anthropic')) return 'anthropic'
+  } catch {
+    /* ignore */
+  }
   return 'openai'
 }
 
@@ -111,6 +128,15 @@ export function providerLabel(provider: ProviderType): string {
   }
 }
 
+/** Short subtitle distinguishing native Anthropic from a third-party proxy. */
+export function providerSubtype(
+  provider: ProviderType,
+  baseUrl: string,
+): string {
+  if (provider !== 'anthropic') return ''
+  return isNativeAnthropic(baseUrl) ? 'native' : 'proxy'
+}
+
 /** Canonical base URL for the /models and chat endpoints, trailing slash removed. */
 export function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '')
@@ -151,18 +177,26 @@ export function chatEndpointUrl(baseUrl: string, provider: ProviderType): string
   return `${base}/v1/chat/completions`
 }
 
-/** Build request headers for the /models call, per provider. */
+/** Build request headers for the /models and chat endpoints, per provider. */
 export function authHeaders(
   apiKey: string,
   provider: ProviderType,
+  baseUrl: string,
 ): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
   }
   if (provider === 'anthropic') {
-    if (apiKey.trim()) headers['x-api-key'] = apiKey.trim()
+    const native = isNativeAnthropic(baseUrl)
+    if (apiKey.trim()) {
+      headers['x-api-key'] = apiKey.trim()
+      // Third-party Anthropic proxies (z.ai, DeepSeek) authenticate with a
+      // bearer token; native Anthropic uses x-api-key only. Send both for
+      // proxies so whichever the proxy recognizes is present.
+      if (!native) headers.Authorization = `Bearer ${apiKey.trim()}`
+    }
     headers['anthropic-version'] = '2023-06-01'
-    // Enable direct browser calls (Anthropic CORS gate).
+    // Opt in to direct browser calls (Anthropic CORS gate; harmless on proxies).
     headers['anthropic-dangerous-direct-browser-access'] = 'true'
     return headers
   }

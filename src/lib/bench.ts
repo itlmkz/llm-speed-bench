@@ -445,7 +445,7 @@ export async function runStreamBench(
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',
   }
-  const auth = authHeaders(endpoint.apiKey, provider)
+  const auth = authHeaders(endpoint.apiKey, provider, baseUrl)
   const headers = { ...baseHeaders, ...auth }
   if (provider === 'openai') {
     headers['HTTP-Referer'] =

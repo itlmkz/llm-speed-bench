@@ -153,7 +153,7 @@ export async function fetchModels(
 
   const provider = detectProvider(baseUrl)
   const url = modelsEndpointUrl(baseUrl, provider)
-  const headers = authHeaders(endpoint.apiKey, provider)
+  const headers = authHeaders(endpoint.apiKey, provider, baseUrl)
 
   const log = newLogEntry(endpoint, url)
   log.request.headers = redactHeaders(headers)

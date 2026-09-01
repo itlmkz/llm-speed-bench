@@ -41,6 +41,7 @@ import { fetchModels } from './lib/models'
 import {
   detectProvider,
   providerLabel,
+  providerSubtype,
   validateBaseUrl,
 } from './lib/providers'
 
@@ -508,6 +509,11 @@ export default function App() {
                   >
                     <Chip.Label>{providerLabel(provider)}</Chip.Label>
                   </Chip>
+                  {provider === 'anthropic' ? (
+                    <span className="text-xs text-muted">
+                      {providerSubtype(provider, endpoint.baseUrl)}
+                    </span>
+                  ) : null}
                   <Button
                     variant="secondary"
                     isDisabled={
