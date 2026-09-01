@@ -8,13 +8,17 @@ export type UrlValidation = {
 
 const ANTHROPIC_HOSTS = ['api.anthropic.com']
 
-function hostOf(url: string): string | null {
+export function hostnameOf(url: string): string | null {
   try {
     const u = new URL(url)
     return u.hostname.toLowerCase()
   } catch {
     return null
   }
+}
+
+function hostOf(url: string): string | null {
+  return hostnameOf(url)
 }
 
 /** True for the real Anthropic API (api.anthropic.com). */
