@@ -9,6 +9,7 @@ function uid(): string {
 export function defaultConfig(): AppConfig {
   const openrouterId = uid()
   const grokId = uid()
+  const anthropicId = uid()
   return {
     endpoints: [
       {
@@ -23,6 +24,12 @@ export function defaultConfig(): AppConfig {
         baseUrl: 'https://api.x.ai/v1',
         apiKey: '',
       },
+      {
+        id: anthropicId,
+        label: 'Anthropic',
+        baseUrl: 'https://api.anthropic.com/v1',
+        apiKey: '',
+      },
     ],
     models: [
       {
@@ -34,6 +41,11 @@ export function defaultConfig(): AppConfig {
         id: uid(),
         endpointId: grokId,
         slug: 'grok-4.3',
+      },
+      {
+        id: uid(),
+        endpointId: anthropicId,
+        slug: 'claude-3-5-haiku-20241022',
       },
     ],
     selectedPresets: ['debug', 'document', 'coding'],

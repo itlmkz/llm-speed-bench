@@ -36,6 +36,20 @@ This app is **client-only**. We do not operate a server that receives or stores 
 
 The live site explains this in the UI banner and next to each API key field.
 
+## Provider support & model discovery
+
+The bench detects the provider from the base URL and uses the right wire format automatically:
+
+- **Anthropic** (`api.anthropic.com`) → native Messages API (`/v1/messages`, `x-api-key`, `anthropic-version`, `anthropic-dangerous-direct-browser-access`), SSE events (`message_start`, `content_block_delta`, `message_delta`).
+- **OpenAI-compatible** (everything else: OpenRouter, xAI, OpenAI, Groq, Ollama, vLLM, …) → `/chat/completions` with `Authorization: Bearer`.
+- A `sk-ant-` key prefix is treated as Anthropic even behind a proxy.
+
+**URL validation:** base URLs that don’t look like a real AI API endpoint (non-http(s), no TLD, marketing/login paths) are flagged inline.
+
+**Automatic model fetcher:** each endpoint has a **Fetch models** button that calls the provider’s `/models` endpoint with your key and lists available slugs. The slug field becomes a combobox — pick from fetched models or type your own. Models auto-fetch once a valid URL + key are present.
+
+**Failure diagnostics:** if the model fetch times out, 404s, or errors, a plain-language message explains what’s wrong (wrong key, wrong URL, no `/models` endpoint, CORS, timeout) and the full request/response is added to the downloadable log.
+
 ## Metrics
 
 | Metric | Meaning |

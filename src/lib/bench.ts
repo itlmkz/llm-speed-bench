@@ -1,16 +1,12 @@
 import type { BenchMetrics, EndpointConfig, TestPreset } from './types'
 import { redactHeaders, type LogEntry } from './log'
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '')
-}
-
-function chatCompletionsUrl(baseUrl: string): string {
-  const base = normalizeBaseUrl(baseUrl)
-  if (base.endsWith('/chat/completions')) return base
-  if (base.endsWith('/v1')) return `${base}/chat/completions`
-  return `${base}/v1/chat/completions`
-}
+import {
+  authHeaders,
+  chatEndpointUrl,
+  detectProvider,
+  normalizeBaseUrl,
+  type ProviderType,
+} from './providers'
 
 function estimateTokens(text: string): number {
   const words = text.trim().split(/\s+/).filter(Boolean).length
@@ -70,50 +66,16 @@ function headersToObject(headers: Headers): Record<string, string> {
   return out
 }
 
-/**
- * Runs one streaming chat completion against an OpenAI-compatible endpoint
- * and measures TTFT, total latency, and tokens/sec. Captures a full request
- * + response log entry for debugging and sharing.
- */
-export async function runStreamBench(
-  input: StreamBenchInput,
-): Promise<StreamBenchOutput> {
-  const { endpoint, slug, preset, signal } = input
-  const url = chatCompletionsUrl(endpoint.baseUrl)
-
-  const body = {
-    model: slug,
-    stream: true,
-    stream_options: { include_usage: true },
-    max_tokens: preset.maxTokens,
-    temperature: 0.2,
-    messages: [
-      { role: 'system', content: preset.system },
-      { role: 'user', content: preset.user },
-    ],
-  }
-
-  const t0 = performance.now()
-  let ttftMs: number | null = null
-  let text = ''
-  let completionTokens: number | null = null
-  let promptTokens: number | null = null
-  let sawUsage = false
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'text/event-stream',
-  }
-  if (endpoint.apiKey.trim()) {
-    headers.Authorization = `Bearer ${endpoint.apiKey.trim()}`
-  }
-  headers['HTTP-Referer'] =
-    typeof window !== 'undefined'
-      ? window.location.origin
-      : 'https://llm-speed-test.milliery.local'
-  headers['X-Title'] = 'LLM Speed Test'
-
-  const logEntry: LogEntry = {
+function newLogEntry(
+  endpoint: EndpointConfig,
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: unknown,
+  slug: string,
+  preset: TestPreset,
+): LogEntry {
+  return {
     id:
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
@@ -126,38 +88,54 @@ export async function runStreamBench(
     baseUrl: endpoint.baseUrl,
     slug,
     request: {
-      method: 'POST',
+      method,
       url,
       headers: redactHeaders(headers),
       body,
     },
   }
+}
 
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    })
-  } catch (err) {
-    if (signal?.aborted) throw err
-    const message = err instanceof Error ? err.message : String(err)
-    logEntry.level = 'error'
-    logEntry.error = `Network/fetch error: ${message}`
-    return {
-      metrics: computeMetrics({
-        ttftMs: null,
-        totalMs: performance.now() - t0,
-        completionTokens: null,
-        promptTokens: null,
-        tokenSource: 'unknown',
-      }),
-      preview: '',
-      log: logEntry,
-    }
+/* ------------------------------------------------------------------ */
+/* OpenAI-compatible streaming (/chat/completions)                    */
+/* ------------------------------------------------------------------ */
+
+function openAiBody(slug: string, preset: TestPreset) {
+  return {
+    model: slug,
+    stream: true,
+    stream_options: { include_usage: true },
+    max_tokens: preset.maxTokens,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: preset.system },
+      { role: 'user', content: preset.user },
+    ],
   }
+}
+
+async function streamOpenAi(args: {
+  url: string
+  headers: Record<string, string>
+  body: unknown
+  signal: AbortSignal | undefined
+  t0: number
+  logEntry: LogEntry
+}): Promise<{ metrics: BenchMetrics; preview: string }> {
+  const { url, headers, body, signal, t0, logEntry } = args
+  let ttftMs: number | null = null
+  let text = ''
+  let completionTokens: number | null = null
+  let promptTokens: number | null = null
+  let sawUsage = false
+  let rawChunks = ''
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  })
 
   logEntry.response = {
     status: res.status,
@@ -176,8 +154,7 @@ export async function runStreamBench(
   }
 
   if (!res.body) {
-    const message =
-      'Response had no body (streaming unsupported by browser/proxy).'
+    const message = 'Response had no body (streaming unsupported by browser/proxy).'
     logEntry.level = 'error'
     logEntry.error = message
     throw Object.assign(new Error(message), { logEntry })
@@ -186,7 +163,6 @@ export async function runStreamBench(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  let rawChunks = ''
 
   const handleData = (payload: string) => {
     if (payload === '[DONE]') return
@@ -226,9 +202,7 @@ export async function runStreamBench(
       ''
 
     if (typeof delta === 'string' && delta.length > 0) {
-      if (ttftMs == null) {
-        ttftMs = performance.now() - t0
-      }
+      if (ttftMs == null) ttftMs = performance.now() - t0
       text += delta
     }
   }
@@ -254,9 +228,7 @@ export async function runStreamBench(
   }
 
   const leftover = buffer.trim()
-  if (leftover.startsWith('data:')) {
-    handleData(leftover.slice(5).trim())
-  }
+  if (leftover.startsWith('data:')) handleData(leftover.slice(5).trim())
 
   const totalMs = performance.now() - t0
 
@@ -271,17 +243,247 @@ export async function runStreamBench(
   logEntry.response.body = rawChunks || '(stream produced no data lines)'
   logEntry.timing = { ttftMs, totalMs }
 
-  const metrics = computeMetrics({
-    ttftMs,
-    totalMs,
-    completionTokens,
-    promptTokens,
-    tokenSource,
+  return {
+    metrics: computeMetrics({
+      ttftMs,
+      totalMs,
+      completionTokens,
+      promptTokens,
+      tokenSource,
+    }),
+    preview: text.slice(0, 280),
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Anthropic native streaming (/v1/messages)                          */
+/* ------------------------------------------------------------------ */
+
+function anthropicBody(slug: string, preset: TestPreset) {
+  return {
+    model: slug,
+    stream: true,
+    max_tokens: preset.maxTokens,
+    temperature: 0.2,
+    system: preset.system,
+    messages: [{ role: 'user', content: preset.user }],
+  }
+}
+
+async function streamAnthropic(args: {
+  url: string
+  headers: Record<string, string>
+  body: unknown
+  signal: AbortSignal | undefined
+  t0: number
+  logEntry: LogEntry
+}): Promise<{ metrics: BenchMetrics; preview: string }> {
+  const { url, headers, body, signal, t0, logEntry } = args
+  let ttftMs: number | null = null
+  let text = ''
+  let completionTokens: number | null = null
+  let promptTokens: number | null = null
+  let sawUsage = false
+  let rawChunks = ''
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
   })
 
+  logEntry.response = {
+    status: res.status,
+    statusText: res.statusText,
+    headers: headersToObject(res.headers),
+    body: '',
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    logEntry.response.body = errText
+    logEntry.level = 'error'
+    const message = `HTTP ${res.status} ${res.statusText} @ ${url} — ${errText.slice(0, 400) || '(empty body)'}`
+    logEntry.error = message
+    throw Object.assign(new Error(message), { logEntry })
+  }
+
+  if (!res.body) {
+    const message = 'Response had no body (streaming unsupported by browser/proxy).'
+    logEntry.level = 'error'
+    logEntry.error = message
+    throw Object.assign(new Error(message), { logEntry })
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent = ''
+
+  const handleEvent = (event: string, data: string) => {
+    let json: unknown
+    try {
+      json = JSON.parse(data)
+    } catch {
+      return
+    }
+    if (!json || typeof json !== 'object') return
+    const obj = json as {
+      type?: string
+      message?: { usage?: { input_tokens?: number; output_tokens?: number } }
+      delta?: {
+        type?: string
+        text?: string
+        partial_json?: string
+      }
+      usage?: {
+        input_tokens?: number
+        output_tokens?: number
+        output_tokens_details?: { text_tokens?: number; reasoning_tokens?: number }
+      }
+    }
+
+    if (event === 'message_start' && obj.message?.usage) {
+      sawUsage = true
+      if (typeof obj.message.usage.input_tokens === 'number') {
+        promptTokens = obj.message.usage.input_tokens
+      }
+    }
+    if (event === 'message_delta' && obj.usage) {
+      sawUsage = true
+      if (typeof obj.usage.output_tokens === 'number') {
+        completionTokens = obj.usage.output_tokens
+      }
+    }
+    if (
+      event === 'content_block_delta' &&
+      obj.delta?.type === 'text_delta' &&
+      typeof obj.delta.text === 'string'
+    ) {
+      if (ttftMs == null) ttftMs = performance.now() - t0
+      text += obj.delta.text
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const chunk = decoder.decode(value, { stream: true })
+    buffer += chunk
+    rawChunks += chunk
+    if (rawChunks.length > 8000) rawChunks = rawChunks.slice(-8000)
+
+    let sep: number
+    while ((sep = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, sep).replace(/\r$/, '')
+      buffer = buffer.slice(sep + 1)
+      if (line === '') {
+        currentEvent = ''
+        continue
+      }
+      if (line.startsWith(':')) continue
+      if (line.startsWith('event:')) {
+        currentEvent = line.slice(6).trim()
+      } else if (line.startsWith('data:')) {
+        handleEvent(currentEvent, line.slice(5).trim())
+      }
+    }
+  }
+
+  const totalMs = performance.now() - t0
+
+  let tokenSource: BenchMetrics['tokenSource'] = 'unknown'
+  if (sawUsage && completionTokens != null) {
+    tokenSource = 'usage'
+  } else if (text.length > 0) {
+    completionTokens = estimateTokens(text)
+    tokenSource = 'estimated'
+  }
+
+  logEntry.response.body = rawChunks || '(stream produced no events)'
+  logEntry.timing = { ttftMs, totalMs }
+
   return {
-    metrics,
+    metrics: computeMetrics({
+      ttftMs,
+      totalMs,
+      completionTokens,
+      promptTokens,
+      tokenSource,
+    }),
     preview: text.slice(0, 280),
-    log: logEntry,
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Public entry                                                        */
+/* ------------------------------------------------------------------ */
+
+function resolveProvider(endpoint: EndpointConfig): ProviderType {
+  const byUrl = detectProvider(endpoint.baseUrl)
+  if (byUrl !== 'unknown') return byUrl
+  // Secondary signal: sk-ant- key prefix implies Anthropic even on proxies.
+  if (/^sk-ant-/i.test(endpoint.apiKey.trim())) return 'anthropic'
+  return 'openai'
+}
+
+/**
+ * Runs one streaming chat completion against an OpenAI-compatible OR
+ * Anthropic native endpoint and measures TTFT, total latency, and tokens/sec.
+ * Captures a full request + response log entry for debugging and sharing.
+ */
+export async function runStreamBench(
+  input: StreamBenchInput,
+): Promise<StreamBenchOutput> {
+  const { endpoint, slug, preset, signal } = input
+  const provider = resolveProvider(endpoint)
+  const baseUrl = normalizeBaseUrl(endpoint.baseUrl)
+  const url = chatEndpointUrl(baseUrl, provider)
+
+  const baseHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  }
+  const auth = authHeaders(endpoint.apiKey, provider)
+  const headers = { ...baseHeaders, ...auth }
+  if (provider === 'openai') {
+    headers['HTTP-Referer'] =
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : 'https://llm-speed-test.milliery.local'
+    headers['X-Title'] = 'LLM Speed Test'
+  }
+
+  const body =
+    provider === 'anthropic' ? anthropicBody(slug, preset) : openAiBody(slug, preset)
+
+  const logEntry = newLogEntry(
+    endpoint,
+    url,
+    'POST',
+    headers,
+    body,
+    slug,
+    preset,
+  )
+
+  const t0 = performance.now()
+
+  try {
+    const out =
+      provider === 'anthropic'
+        ? await streamAnthropic({ url, headers, body, signal, t0, logEntry })
+        : await streamOpenAi({ url, headers, body, signal, t0, logEntry })
+    return { metrics: out.metrics, preview: out.preview, log: logEntry }
+  } catch (error) {
+    if (signal?.aborted) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    if (!logEntry.error) {
+      logEntry.level = 'error'
+      logEntry.error = `Network/fetch error: ${message}`
+      logEntry.timing = { ttftMs: null, totalMs: performance.now() - t0 }
+    }
+    throw Object.assign(new Error(message), { logEntry })
   }
 }

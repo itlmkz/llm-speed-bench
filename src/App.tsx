@@ -37,6 +37,12 @@ import { AboutSection } from './components/AboutSection'
 import { SiteHeader, type View } from './components/SiteHeader'
 import { BRAND } from './lib/brand'
 import { downloadLogs, type LogEntry } from './lib/log'
+import { fetchModels } from './lib/models'
+import {
+  detectProvider,
+  providerLabel,
+  validateBaseUrl,
+} from './lib/providers'
 
 function resultKey(presetId: string, modelId: string): string {
   return `${presetId}::${modelId}`
@@ -67,12 +73,24 @@ export default function App() {
   const [results, setResults] = useState<BenchResult[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [running, setRunning] = useState(false)
+  const [modelState, setModelState] = useState<
+    Record<
+      string,
+      {
+        status: 'idle' | 'loading' | 'ok' | 'error'
+        models: string[]
+        error: string
+        fetchedAt: number
+      }
+    >
+  >({})
   const [view, setView] = useState<View>(() =>
     typeof window !== 'undefined' && window.location.hash === '#about'
       ? 'about'
       : 'bench',
   )
   const abortRef = useRef<AbortController | null>(null)
+  const fetchTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   useEffect(() => {
     setConfig(loadConfig())
@@ -138,7 +156,65 @@ export default function App() {
         endpoint.id === id ? { ...endpoint, ...patch } : endpoint,
       ),
     }))
+    // If URL or key changed, reset fetch state so auto-fetch re-runs.
+    if ('baseUrl' in patch || 'apiKey' in patch) {
+      setModelState((current) =>
+        current[id]
+          ? { ...current, [id]: { ...current[id], status: 'idle' } }
+          : current,
+      )
+    }
   }
+
+  const fetchModelsFor = async (endpointId: string) => {
+    const endpoint = config.endpoints.find((e) => e.id === endpointId)
+    if (!endpoint) return
+    setModelState((current) => ({
+      ...current,
+      [endpointId]: {
+        status: 'loading',
+        models: current[endpointId]?.models ?? [],
+        error: '',
+        fetchedAt: 0,
+      },
+    }))
+    const result = await fetchModels(endpoint)
+    setLogs((current) => [...current, result.log])
+    setModelState((current) => ({
+      ...current,
+      [endpointId]: {
+        status: result.errorKind === 'ok' ? 'ok' : 'error',
+        models: result.models,
+        error: result.error,
+        fetchedAt: Date.now(),
+      },
+    }))
+  }
+
+  // Auto-fetch models for endpoints that have a valid URL + key and haven't
+  // been fetched yet (debounced). Keeps the experience smooth without spamming.
+  useEffect(() => {
+    if (!hydrated) return
+    for (const endpoint of config.endpoints) {
+      const hasKey = endpoint.apiKey.trim().length > 0
+      const validation = validateBaseUrl(endpoint.baseUrl)
+      const state = modelState[endpoint.id]
+      const shouldFetch =
+        hasKey &&
+        !validation.suspect &&
+        (!state || state.status === 'idle')
+      if (shouldFetch) {
+        clearTimeout(fetchTimers.current[endpoint.id])
+        fetchTimers.current[endpoint.id] = setTimeout(() => {
+          void fetchModelsFor(endpoint.id)
+        }, 900)
+      }
+    }
+    return () => {
+      for (const t of Object.values(fetchTimers.current)) clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, config.endpoints, config.endpoints.length])
 
   const removeEndpoint = (id: string) => {
     setConfig((current) => ({
@@ -347,64 +423,131 @@ export default function App() {
         <Card.Header>
           <Card.Title>Endpoints</Card.Title>
           <Card.Description>
-            OpenRouter, xAI/Grok, OpenAI, Groq, Ollama, or any OpenAI-compatible
-            base URL. Paste each provider&apos;s API key below — it stays in
-            your browser only.
+            OpenRouter, xAI/Grok, OpenAI, Anthropic, Groq, Ollama, or any
+            OpenAI-compatible base URL. Provider type is detected
+            automatically. Paste each provider&apos;s API key below — it stays
+            in your browser only.
           </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
-          {config.endpoints.map((endpoint) => (
-            <div
-              key={endpoint.id}
-              className="grid gap-3 rounded-2xl border border-border bg-surface/70 p-4 md:grid-cols-[1fr_1.4fr_1.3fr_auto] md:items-end"
-            >
-              <TextField
-                aria-label="Endpoint label"
-                value={endpoint.label}
-                onChange={(value) => updateEndpoint(endpoint.id, { label: value })}
+          {config.endpoints.map((endpoint) => {
+            const provider = detectProvider(endpoint.baseUrl)
+            const validation = validateBaseUrl(endpoint.baseUrl)
+            const ms = modelState[endpoint.id]
+            const fetchStatus = ms?.status ?? 'idle'
+            return (
+              <div
+                key={endpoint.id}
+                className="flex flex-col gap-3 rounded-2xl border border-border bg-surface/70 p-4"
               >
-                <Label>Label</Label>
-                <Input placeholder="OpenRouter" />
-              </TextField>
-              <TextField
-                aria-label="Base URL"
-                value={endpoint.baseUrl}
-                onChange={(value) =>
-                  updateEndpoint(endpoint.id, { baseUrl: value })
-                }
-              >
-                <Label>Base URL</Label>
-                <Input
-                  className="font-mono text-sm"
-                  placeholder="https://openrouter.ai/api/v1"
-                  spellCheck={false}
-                />
-              </TextField>
-              <TextField
-                aria-label="API key"
-                type="password"
-                value={endpoint.apiKey}
-                onChange={(value) =>
-                  updateEndpoint(endpoint.id, { apiKey: value })
-                }
-              >
-                <Label>API key</Label>
-                <Input placeholder="sk-…" autoComplete="off" />
-                <Description>
-                  Stored locally in this browser (localStorage), not on our
-                  servers.
-                </Description>
-              </TextField>
-              <Button
-                variant="ghost"
-                className="text-danger"
-                isDisabled={config.endpoints.length <= 1}
-                onPress={() => removeEndpoint(endpoint.id)}
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
+                <div className="grid gap-3 md:grid-cols-[1fr_1.4fr_1.3fr_auto] md:items-end">
+                  <TextField
+                    aria-label="Endpoint label"
+                    value={endpoint.label}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { label: value })
+                    }
+                  >
+                    <Label>Label</Label>
+                    <Input placeholder="OpenRouter" />
+                  </TextField>
+                  <TextField
+                    aria-label="Base URL"
+                    value={endpoint.baseUrl}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { baseUrl: value })
+                    }
+                  >
+                    <Label>Base URL</Label>
+                    <Input
+                      className="font-mono text-sm"
+                      placeholder="https://openrouter.ai/api/v1"
+                      spellCheck={false}
+                    />
+                    {validation.suspect ? (
+                      <Description className="text-warning">
+                        ⚠ {validation.reason}
+                      </Description>
+                    ) : null}
+                  </TextField>
+                  <TextField
+                    aria-label="API key"
+                    type="password"
+                    value={endpoint.apiKey}
+                    onChange={(value) =>
+                      updateEndpoint(endpoint.id, { apiKey: value })
+                    }
+                  >
+                    <Label>API key</Label>
+                    <Input placeholder="sk-… / sk-ant-…" autoComplete="off" />
+                    <Description>
+                      Stored locally in this browser (localStorage), not on
+                      our servers.
+                    </Description>
+                  </TextField>
+                  <Button
+                    variant="ghost"
+                    className="text-danger"
+                    isDisabled={config.endpoints.length <= 1}
+                    onPress={() => removeEndpoint(endpoint.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3 text-sm">
+                  <Chip
+                    color={
+                      provider === 'unknown'
+                        ? 'default'
+                        : provider === 'anthropic'
+                          ? 'accent'
+                          : 'success'
+                    }
+                    variant="soft"
+                    size="sm"
+                  >
+                    <Chip.Label>{providerLabel(provider)}</Chip.Label>
+                  </Chip>
+                  <Button
+                    variant="secondary"
+                    isDisabled={
+                      fetchStatus === 'loading' ||
+                      validation.suspect ||
+                      !endpoint.apiKey.trim()
+                    }
+                    onPress={() => fetchModelsFor(endpoint.id)}
+                  >
+                    {fetchStatus === 'loading' ? (
+                      <>
+                        <Spinner size="sm" color="current" />
+                        Fetching…
+                      </>
+                    ) : (
+                      'Fetch models'
+                    )}
+                  </Button>
+                  {fetchStatus === 'ok' ? (
+                    <span className="text-xs text-muted">
+                      ✓ {ms?.models.length ?? 0} model
+                      {ms?.models.length === 1 ? '' : 's'} available
+                    </span>
+                  ) : null}
+                  {fetchStatus === 'error' ? (
+                    <span className="text-xs text-danger">
+                      {ms?.error}
+                    </span>
+                  ) : null}
+                  {fetchStatus === 'idle' &&
+                  endpoint.apiKey.trim() &&
+                  !validation.suspect ? (
+                    <span className="text-xs text-muted">
+                      Auto-fetching models…
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
         </Card.Content>
         <Card.Footer>
           <Button
@@ -472,8 +615,29 @@ export default function App() {
                   className="font-mono text-sm"
                   placeholder="openai/gpt-4o-mini"
                   spellCheck={false}
+                  list={`models-${model.endpointId}`}
                 />
+                <Description>
+                  {(() => {
+                    const fetched = modelState[model.endpointId]?.models ?? []
+                    if (fetched.length) {
+                      return `Pick from ${fetched.length} fetched models, or type a slug.`
+                    }
+                    return 'Type a slug, or fetch models for the endpoint above.'
+                  })()}
+                </Description>
               </TextField>
+              {(() => {
+                const fetched = modelState[model.endpointId]?.models ?? []
+                if (!fetched.length) return null
+                return (
+                  <datalist id={`models-${model.endpointId}`}>
+                    {fetched.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                )
+              })()}
               <Button
                 variant="ghost"
                 className="text-danger"
