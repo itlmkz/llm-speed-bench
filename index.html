@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Live streaming-speed readout for pi: TTFT stopwatch, per-model tok/s medians, speedometer footer (🐌→🚀). Measures your providers from your network path.">
+  <meta name="theme-color" content="#0f172a">
+  <meta property="og:title" content="pi-LLM-speed-test-extension">
+  <meta property="og:description" content="Live LLM streaming speed readout for pi — TTFT, decode tok/s, overall tok/s, with a speedometer footer that reacts to real speed.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://itlmkz.github.io/pi-LLM-speed-test-extension/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="pi-LLM-speed-test-extension">
+  <meta name="twitter:description" content="Measure LLM speed from your own seat. No CORS. Your keys. Your network path.">
+  <title>pi-LLM-speed-test-extension — Live streaming speed readout for pi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f1a;
+      --bg-elevated: #111827;
+      --fg: #e2e8f0;
+      --fg-muted: #64748b;
+      --accent: #22d3ee;
+      --accent-dim: #06b6d4;
+      --border: #1e293b;
+      --card: #0f172a;
+      --snail: #94a3b8;
+      --turtle: #64748b;
+      --walker: #f59e0b;
+      --cyclist: #22c55e;
+      --racer: #ef4444;
+      --rocket: #a855f7;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8fafc;
+        --bg-elevated: #ffffff;
+        --fg: #0f172a;
+        --fg-muted: #475569;
+        --accent: #0891b2;
+        --accent-dim: #0e7490;
+        --border: #e2e8f0;
+        --card: #ffffff;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Space Grotesk', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .container { max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem; }
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+      padding-top: 1rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.35rem 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 1.25rem;
+    }
+    .badge svg { width: 14px; height: 14px; }
+    h1 {
+      font-size: clamp(2.5rem, 5vw, 3.5rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 1rem;
+    }
+    h1 .icon { display: inline-block; margin-right: 0.5rem; }
+    .tagline {
+      font-size: clamp(1.1rem, 2.5vw, 1.3rem);
+      color: var(--fg-muted);
+      max-width: 60ch;
+      margin: 0 auto;
+      font-weight: 400;
+    }
+    .install-bar {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 2rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.7rem 1.25rem;
+      border-radius: 0.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+    }
+    .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    .btn-secondary {
+      background: var(--bg-elevated);
+      color: var(--fg);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--accent); }
+    .section {
+      margin-top: 3.5rem;
+    }
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .section-title::before {
+      content: "";
+      width: 4px;
+      height: 1.5rem;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+    .tier-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      text-align: center;
+      transition: all 0.2s ease;
+    }
+    .tier-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .tier-icon { font-size: 3rem; line-height: 1; margin-bottom: 0.75rem; }
+    .tier-range { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; color: var(--fg-muted); margin-bottom: 0.5rem; }
+    .tier-label { font-weight: 600; color: var(--fg); }
+    .code-block {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      overflow-x: auto;
+      color: var(--fg);
+    }
+    .code-block .comment { color: var(--fg-muted); }
+    .code-block .keyword { color: #c084fc; }
+    .code-block .string { color: #4ade80; }
+    .code-block .command { color: var(--accent); }
+    .footer-demo {
+      background: linear-gradient(90deg, var(--bg-elevated), var(--card));
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1rem 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .footer-demo .icon { font-size: 1.25rem; }
+    .footer-demo .metric { color: var(--fg-muted); }
+    .footer-demo .value { color: var(--fg); font-weight: 500; }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .feature {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+    }
+    .feature h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--fg); }
+    .feature p { font-size: 0.9rem; color: var(--fg-muted); line-height: 1.6; }
+    .metrics-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+    .metrics-table th, .metrics-table td {
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .metrics-table th { color: var(--fg-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; }
+    .metrics-table td { color: var(--fg); }
+    .metrics-table tr:hover td { background: var(--bg-elevated); }
+    .metrics-table .tier { text-align: center; }
+    .legend { margin-top: 1rem; font-size: 0.8rem; color: var(--fg-muted); line-height: 1.8; }
+    .legend strong { color: var(--fg); }
+    @media (max-width: 640px) {
+      .container { padding: 2rem 1rem; }
+      .footer-demo { font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+        pi extension · v0.1.0
+      </div>
+      <h1><span class="icon">⚡</span>pi-LLM-speed-test-extension</h1>
+      <p class="tagline">Live streaming-speed readout for <a href="https://github.com/earendil-works/pi-coding-agent" style="color: var(--accent); text-decoration: none;">pi</a> — TTFT stopwatch, per-model tok/s medians, and a speedometer footer that reacts to how fast your model is actually generating.</p>
+      <div class="install-bar">
+        <a href="https://github.com/itlmkz/pi-LLM-speed-test-extension" class="btn btn-primary" target="_blank">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.536-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+        <a href="#install" class="btn btn-secondary">Install</a>
+      </div>
+    </header>
+
+    <section class="section" id="speedometer">
+      <h2 class="section-title">The Speedometer</h2>
+      <p style="color: var(--fg-muted); max-width: 60ch; margin-bottom: 1.5rem;">
+        While your agent streams a response, the footer becomes a live speedometer. The icon reacts to <strong>decode tok/s</strong> (raw generation speed after the first token).
+      </p>
+      <div class="tier-grid">
+        <div class="tier-card"><div class="tier-icon">🐌</div><div class="tier-range">&lt; 5 tok/s</div><div class="tier-label">Crawl</div></div>
+        <div class="tier-card"><div class="tier-icon">🐢</div><div class="tier-range">5–15 tok/s</div><div class="tier-label">Slow</div></div>
+        <div class="tier-card"><div class="tier-icon">🚶</div><div class="tier-range">15–30 tok/s</div><div class="tier-label">Walk</div></div>
+        <div class="tier-card"><div class="tier-icon">🚴</div><div class="tier-range">30–60 tok/s</div><div class="tier-label">Bike</div></div>
+        <div class="tier-card"><div class="tier-icon">🏎️</div><div class="tier-range">60–120 tok/s</div><div class="tier-label">Race</div></div>
+        <div class="tier-card"><div class="tier-icon">🚀</div><div class="tier-range">≥ 120 tok/s</div><div class="tier-label">Fly</div></div>
+      </div>
+      <p style="margin-top: 1.5rem; color: var(--fg-muted); font-size: 0.9rem;">
+        During prefill (waiting for the first token), a rolling die counts up your TTFT: <span style="font-family: 'JetBrains Mono', monospace; color: var(--accent);">⚄ TTFT 2.3s…</span>
+      </p>
+    </section>
+
+    <section class="section" id="metrics">
+      <h2 class="section-title">Three Metrics, Three Questions</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+        <div class="feature">
+          <h4>TTFT</h4>
+          <p>Time from request sent → first streamed token. The "staring at nothing" wait. Queue + prefill + first byte travel.</p>
+        </div>
+        <div class="feature">
+          <h4>Decode tok/s</h4>
+          <p><code>(tokens−1) ÷ seconds after first token</code>. Raw generation speed once tokens flow. Model capability, minus the wait.</p>
+        </div>
+        <div class="feature">
+          <h4>Overall tok/s</h4>
+          <p><code>tokens ÷ total seconds</code>. End-to-end speed including the prefill wait. What the call actually felt like.</p>
+        </div>
+      </div>
+
+      <div class="code-block" style="margin-bottom: 1rem;">
+<span class="comment"># /speed — session table (per-model medians)</span>
+ model                          resp      TTFT  decode tok/s  overall tok/s  out tok      cost
+ claude-opus-4-6                   3     812ms          61.3           58.1      890     $0.35
+ zai/glm-5.3                        12      6.6s          47.2            6.2     5.2k     $0.04
+──────────────────────────────────────────────────────────────────────────────────────────
+<span class="comment"># Legend — plain words for what each column means</span>
+ TTFT · time from request sent to first streamed token (e.g. 1.2s = you stared at nothing for 1.2s)
+ decode tok/s · (tokens−1) ÷ seconds AFTER first token — raw generation speed of the model
+ overall tok/s · tokens ÷ TOTAL seconds — the speed you actually feel (includes prefill wait)
+ out tok · total output tokens this session · 15 responses · $0.39 spent
+      </div>
+
+      <div class="footer-demo" style="margin-top: 1rem;">
+        <span class="icon">🏎️</span>
+        <span><span class="metric">claude-opus-4-6:</span> <span class="value">890 tok</span> · <span class="metric">TTFT</span> <span class="value">812ms</span> · <span class="metric">decode</span> <span class="value">61.3 tok/s</span> · <span class="metric">overall</span> <span class="value">58.1 tok/s</span>
+      </div>
+
+      <div class="legend" style="margin-top: 1rem;">
+        <strong>TTFT</strong> — request sent → first streamed token (you stared at nothing for 812ms)<br>
+        <strong>decode tok/s</strong> — (tokens−1) ÷ secs AFTER first token — raw generation speed<br>
+        <strong>overall tok/s</strong> — tokens ÷ TOTAL secs — the speed you actually feel (includes prefill wait)<br>
+        <strong>out tok</strong> — total output tokens this session · <strong>3 responses</strong> · <strong>$0.39 spent</strong>
+      </div>
+    </section>
+
+    <section class="section" id="install">
+      <h2 class="section-title">Install</h2>
+      <div class="features" style="margin-bottom: 2rem;">
+        <div class="feature">
+          <h4>Global (all pi sessions)</h4>
+          <p>Installs into <code>~/.pi/agent/extensions/</code> — auto-discovered in every session.</p>
+        </div>
+        <div class="feature">
+          <h4>Project-local</h4>
+          <p>Copies into <code>.pi/extensions/</code> — loads when the project is trusted.</p>
+        </div>
+      </div>
+      <div class="code-block">
+<span class="comment"># One-liner global install</span>
+<span class="command">pi install git:github.com/itlmkz/pi-LLM-speed-test-extension</span>
+
+<span class="comment"># Or clone and copy manually</span>
+<span class="command">cp speed-counter.ts ~/.pi/agent/extensions/</span>
+<span class="comment"># then /reload in a running session</span>
+      </div>
+      <p style="margin-top: 1rem; color: var(--fg-muted); font-size: 0.9rem;">
+        Commands: <code>/speed</code> (session table), <code>/speed clear</code>, <code>/speed off</code>, <code>/speed on</code>
+      </p>
+    </section>
+
+    <section class="section" id="why">
+      <h2 class="section-title">Why From Your Seat?</h2>
+      <p style="color: var(--fg-muted); max-width: 60ch; margin-bottom: 1.5rem;">
+        Published leaderboards measure from datacenters in a few regions, with synthetic prompts.
+        The weekly decision — <em>which provider and model should I route my coding work through</em> — depends on where <strong>you</strong> are, what <strong>your</strong> machine does, and which keys <strong>you</strong> already hold.
+      </p>
+      <div class="features">
+        <div class="feature">
+          <h4>Your network path</h4>
+          <p>Geography is the biggest latency term — hundreds of ms before any model runs. We measure <em>your</em> path.</p>
+        </div>
+        <div class="feature">
+          <h4>Your keys, your config</h4>
+          <p>Reads providers straight from pi's settings. No extra setup. Strict-CORS providers (Anthropic, OpenAI direct) work because it runs in Node, not the browser.</p>
+        </div>
+        <div class="feature">
+          <h4>Your history</h4>
+          <p><code>/speed</code> builds a session log with per-model medians, totals, and cost. No dashboard to visit — it's in your terminal.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: var(--fg-muted); font-size: 0.85rem;">
+      <p>MIT License · <a href="https://github.com/itlmkz/pi-LLM-speed-test-extension" style="color: var(--accent);">itlmkz/pi-LLM-speed-test-extension</a> · Built for <a href="https://github.com/earendil-works/pi-coding-agent" style="color: var(--accent);">pi</a></p>
+    </footer>
+  </div>
+</body>
+</html>
