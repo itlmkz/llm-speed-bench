@@ -1,0 +1,12 @@
+# Dependencies
+node_modules
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Logs
+*.log
+npm-debug.log*
