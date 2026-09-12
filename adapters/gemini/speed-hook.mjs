@@ -7,10 +7,11 @@
  *   AfterModel  → mine usageMetadata from the response payload, record stat
  *
  * Works for Qwen Code (a Gemini CLI fork) via the same extension layout.
+ * CLI: `node speed-hook.mjs table [sessionId]`.
  */
 
 import { readFileSync } from "node:fs";
-import { recordStart, takeStart, computeStat, appendStat, renderTable, readStats, charsToTokens } from "../../core/speed-core.mjs";
+import { recordStart, takeStart, computeStat, appendStat, renderTable, readStats } from "../../core/speed-core.mjs";
 
 function readStdin() {
   try {
@@ -61,24 +62,25 @@ function main() {
   const input = readStdin();
   const sessionId = process.env.GEMINI_SESSION_ID || input.session_id || input.sessionId || "unknown";
   const event =
+    input.hook_event_name ||
     process.env.LLM_SPEED_EVENT ||
     (input.usageMetadata || input.response ? "AfterModel" : input.prompt ? "BeforeModel" : "");
 
-  if (event === "BeforeModel" || input.hook_event_name === "BeforeModel") {
+  if (event === "BeforeModel") {
     recordStart(sessionId, { agent: "gemini", model: findModel(input) });
     return;
   }
 
-  if (event === "AfterModel" || input.hook_event_name === "AfterModel") {
-    const start = takeStart(sessionId);
-    if (!start) return;
+  if (event === "AfterModel") {
+    // Mine first, claim second: a failed mine must not destroy the marker.
     const usage = findUsage(input);
     if (!usage) return;
-    const totalMs = Date.now() - start.t0;
+    const start = takeStart(sessionId);
+    if (!start) return;
     appendStat(
       computeStat({
         t0: start.t0,
-        totalMs,
+        totalMs: Date.now() - start.t0,
         outputTokens: usage.outputTokens,
         costUsd: usage.costUsd || 0,
         model: findModel(input) || start.model || "",
@@ -90,4 +92,8 @@ function main() {
   }
 }
 
-main();
+try {
+  main();
+} catch {
+  /* never break the host agent */
+}

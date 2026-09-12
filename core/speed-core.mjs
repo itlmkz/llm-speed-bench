@@ -1,21 +1,29 @@
 /**
  * speed-core — shared metrics engine for the llm-speed-bench agent adapters.
  *
- * Every adapter (Claude Code, Codex, Grok Build, Gemini CLI, Qwen Code,
- * opencode, MiMo Code, pi) writes to the same on-disk store so tooling can
- * read one uniform format:
+ * Hook- and plugin-based adapters (Claude Code, Codex, Grok Build, Gemini CLI,
+ * Qwen Code, opencode, MiMo Code) write to the same on-disk store so tooling
+ * can read one uniform format:
  *
  *   ~/.cache/llm-speed-bench/
  *     starts/<sessionId>.json   in-flight turn markers (t0, model, agent)
  *     stats.jsonl               one line per completed response
  *
+ * (pi's native extension keeps its numbers in-session instead — see /speed.)
+ *
  * Metrics (same definitions everywhere):
  *   TTFT          request sent → first streamed token
  *   decode tok/s  (tokens − 1) ÷ seconds AFTER the first token
  *   overall tok/s tokens ÷ total seconds (what you actually feel)
+ *
+ * Everything here is crash-safe by design: adapters run inside host coding
+ * agents, so no fs failure may ever escape as an exception.
  */
 
-import { mkdirSync, readFileSync, writeFileSync, appendFileSync, existsSync, rmSync } from "node:fs";
+import {
+  mkdirSync, readFileSync, writeFileSync, appendFileSync, existsSync, rmSync,
+  renameSync, statSync, readdirSync, openSync, fstatSync, readSync, closeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -23,6 +31,7 @@ export const STORE_DIR =
   process.env.LLM_SPEED_DIR || join(homedir(), ".cache", "llm-speed-bench");
 const STARTS = join(STORE_DIR, "starts");
 const STATS = join(STORE_DIR, "stats.jsonl");
+const MAX_STATS_BYTES = 16 * 1024 * 1024;
 
 function ensureDirs() {
   mkdirSync(STARTS, { recursive: true });
@@ -34,37 +43,74 @@ function safeId(id) {
 
 /** Record the moment a turn was kicked off (user prompt / model request). */
 export function recordStart(sessionId, meta = {}) {
-  ensureDirs();
-  const file = join(STARTS, safeId(sessionId) + ".json");
-  writeFileSync(file, JSON.stringify({ t0: Date.now(), ...meta }));
+  try {
+    ensureDirs();
+    const { t0: _clobber, ...rest } = meta; // meta can never override t0
+    writeFileSync(join(STARTS, safeId(sessionId) + ".json"), JSON.stringify({ ...rest, t0: Date.now() }));
+    // opportunistic prune of markers whose Stop never fired (host killed, etc.)
+    try {
+      for (const f of readdirSync(STARTS)) {
+        const p = join(STARTS, f);
+        if (Date.now() - statSync(p).mtimeMs > 24 * 3600 * 1000) rmSync(p);
+      }
+    } catch {}
+  } catch { /* never break the host agent */ }
 }
 
-/** Read + remove the in-flight marker. Returns null when absent. */
+/** Atomically claim + read + remove the in-flight marker. Returns null when absent/corrupt. */
 export function takeStart(sessionId) {
   const file = join(STARTS, safeId(sessionId) + ".json");
-  if (!existsSync(file)) return null;
+  const claim = `${file}.${process.pid}.claim`;
   try {
-    return JSON.parse(readFileSync(file, "utf8"));
+    renameSync(file, claim); // atomic: exactly one concurrent caller wins
+  } catch {
+    return null; // ENOENT → absent or already claimed
+  }
+  try {
+    const start = JSON.parse(readFileSync(claim, "utf8"));
+    return Number.isFinite(start?.t0) ? start : null; // reject corrupt markers
   } catch {
     return null;
   } finally {
-    try { rmSync(file); } catch {}
+    try { rmSync(claim); } catch {}
   }
 }
 
-/** Append one completed-response stat. */
+/** Append one completed-response stat (with lightweight rotation). */
 export function appendStat(stat) {
-  ensureDirs();
-  appendFileSync(STATS, JSON.stringify({ ts: Date.now(), ...stat }) + "\n");
+  try {
+    ensureDirs();
+    try {
+      if (existsSync(STATS) && statSync(STATS).size > MAX_STATS_BYTES) {
+        renameSync(STATS, `${STATS}.${new Date().toISOString().slice(0, 10)}`);
+      }
+    } catch {}
+    appendFileSync(STATS, JSON.stringify({ ts: Date.now(), ...stat }) + "\n");
+  } catch { /* never break the host agent */ }
 }
 
-/** Read the last `limit` stats (newest last). */
+/** Read the last `limit` stats (newest last) via a bounded tail read. */
 export function readStats(limit = 200) {
-  if (!existsSync(STATS)) return [];
-  const lines = readFileSync(STATS, "utf8").split("\n").filter(Boolean);
-  return lines.slice(-limit).map((l) => {
-    try { return JSON.parse(l); } catch { return null; }
-  }).filter(Boolean);
+  try {
+    if (!existsSync(STATS)) return [];
+    const CHUNK = 256 * 1024; // >200 rows comfortably (~150 B/row)
+    const fd = openSync(STATS, "r");
+    try {
+      const size = fstatSync(fd).size;
+      const len = Math.min(size, CHUNK);
+      const buf = Buffer.alloc(len);
+      readSync(fd, buf, 0, len, size - len);
+      const lines = buf.toString("utf8").split("\n").filter(Boolean);
+      if (size > len && lines.length) lines.shift(); // drop possibly-torn first line
+      return lines.slice(-limit)
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+        .filter(Boolean);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
 }
 
 export function median(values) {
@@ -74,19 +120,20 @@ export function median(values) {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
-/** Build a full stat from raw timings. */
+/** Build a full stat from raw timings. NaN- and type-poisoning proof. */
 export function computeStat({ t0, ttftMs = 0, totalMs, outputTokens, costUsd = 0, model = "", agent = "", session = "" }) {
-  const total = Math.max(1, totalMs);
-  const ttft = ttftMs > 0 ? ttftMs : 0;
+  const total = Number.isFinite(totalMs) && totalMs > 0 ? Math.max(1, Math.round(totalMs)) : 1;
+  const ttft = Number.isFinite(ttftMs) && ttftMs > 0 ? Math.round(ttftMs) : 0;
+  const tokens = Number.isFinite(outputTokens) ? Math.max(0, Math.round(outputTokens)) : 0;
   const gen = Math.max(1, total - ttft);
   return {
-    agent, session, model,
+    agent: String(agent ?? ""), session: String(session ?? ""), model: String(model ?? ""),
     ttftMs: ttft,
     totalMs: total,
-    outputTokens,
-    decodeTps: outputTokens > 0 ? (outputTokens - 1) / (gen / 1000) : 0,
-    overallTps: outputTokens > 0 ? outputTokens / (total / 1000) : 0,
-    costUsd,
+    outputTokens: tokens,
+    decodeTps: tokens > 0 ? (tokens - 1) / (gen / 1000) : 0,
+    overallTps: tokens > 0 ? tokens / (total / 1000) : 0,
+    costUsd: Number.isFinite(costUsd) ? costUsd : 0,
   };
 }
 
@@ -142,7 +189,7 @@ export function renderTable(stats = readStats()) {
   );
   for (const a of aggs) {
     lines.push(
-      `${a.agent.padEnd(9).slice(0, 9)} ${a.model.padEnd(28).slice(0, 28)} ${String(a.responses).padStart(4)}  ${a.ttfts.length ? fmtMs(median(a.ttfts)).padStart(7) : "—".padStart(7)}  ${fmtTps(median(a.decodes)).padStart(12)}  ${fmtTps(median(a.overalls)).padStart(13)}  ${fmtTokens(a.tokens).padStart(7)}  ${fmtCost(a.costUsd).padStart(8)}`,
+      `${String(a.agent ?? "?").padEnd(9).slice(0, 9)} ${String(a.model ?? "?").padEnd(28).slice(0, 28)} ${String(a.responses).padStart(4)}  ${a.ttfts.length ? fmtMs(median(a.ttfts)).padStart(7) : "—".padStart(7)}  ${fmtTps(median(a.decodes)).padStart(12)}  ${fmtTps(median(a.overalls)).padStart(13)}  ${fmtTokens(a.tokens).padStart(7)}  ${fmtCost(a.costUsd).padStart(8)}`,
     );
   }
   lines.push("");

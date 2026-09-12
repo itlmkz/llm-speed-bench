@@ -7,17 +7,20 @@
  *   - `hook_event_name`, `session_id`, `transcript_path` fields
  *
  * Wired via:
- *   Claude Code  ~/.claude/settings.json          (hooks.UserPromptSubmit / hooks.Stop)
- *   Codex        ~/.codex/hooks.json               (same event names)
- *   Grok Build   ~/.grok/hooks/llm-speed-bench.json (same event names)
+ *   Claude Code  ~/.claude/settings.json   (hooks.UserPromptSubmit / hooks.Stop)
+ *   Codex        ~/.codex/hooks.json        (same event names; trust via /hooks)
+ *   Grok Build   ~/.grok/hooks/*.json       (same event names)
  *
- * Metrics: turn duration + output tokens + overall tok/s + cost, read from the
- * agent transcript at Stop time. Streaming deltas are not exposed by these
- * hook APIs, so TTFT is measured by the opencode/Gemini-class adapters and the
- * pi extension instead. Use `node speed-hook.mjs table` to print the stats.
+ * Metrics: turn duration + output tokens + overall tok/s + cost, mined from
+ * the agent transcript at Stop time (streamed with readline — constant memory
+ * even for giant transcripts). Streaming deltas are not exposed by these hook
+ * APIs, so TTFT is measured by the opencode-class plugin and pi extension.
+ *
+ * CLI: `node speed-hook.mjs table [sessionId]` prints the stats table.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, createReadStream, readFileSync } from "node:fs";
+import * as readline from "node:readline";
 import { recordStart, takeStart, computeStat, appendStat, renderTable, readStats } from "../../core/speed-core.mjs";
 
 // --- identify which agent invoked us -------------------------------------
@@ -32,57 +35,84 @@ function detectAgent(env, input, transcriptHint) {
   return "unknown";
 }
 
-// --- transcript mining -----------------------------------------------------
-/** Walk a JSONL transcript and return the best {outputTokens, costUsd, model} found. */
-function mineTranscript(path) {
+// --- transcript mining (streaming, turn-aware, cumulative-safe) -----------
+/**
+ * Walk a JSONL transcript with readline and return
+ * { outputTokens, inputTokens, costUsd, model, hint, lastEntryTs } for the
+ * LAST turn, or null when nothing countable is found.
+ */
+async function mineTranscript(path) {
   if (!path || !existsSync(path)) return null;
-  let out = null;
+  let out = null; // accumulated usage for the current turn
   let model = "";
   let hint = "";
-  for (const line of readFileSync(path, "utf8").split("\n")) {
+  let lastEntryTs = 0;
+  const rl = readline.createInterface({
+    input: createReadStream(path, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  for await (const line of rl) {
     if (!line.trim()) continue;
     let entry;
-    try { entry = JSON.parse(line); } catch { continue; }
+    try { entry = JSON.parse(line); } catch { continue; } // torn writes / bad encodings
 
-    // Claude Code: {type:"assistant", message:{model, usage:{output_tokens,...}}}
+    const ts = Date.parse(entry?.timestamp ?? "");
+    if (Number.isFinite(ts)) lastEntryTs = ts;
+
+    // A genuine user prompt starts a new turn → reset accumulation.
+    // Tool results also arrive as type:"user" but carry an array content with
+    // tool_result parts — those are mid-turn and must NOT reset.
+    if (entry?.type === "user") {
+      const c = entry?.message?.content;
+      const isToolResult = Array.isArray(c) && c.some?.((p) => p?.type === "tool_result");
+      if (!isToolResult) out = null;
+    }
+
+    const acc = (hint0, tok, inp, cost) => {
+      const base = out?.hint === hint0 ? out : { outputTokens: 0, inputTokens: 0, costUsd: 0 };
+      out = {
+        outputTokens: base.outputTokens + tok,
+        inputTokens: base.inputTokens + inp,
+        costUsd: base.costUsd + cost,
+        hint: hint0,
+      };
+    };
+
+    // Claude Code: {type:"assistant", message:{model, usage:{output_tokens,…}}, costUSD}
     const usage = entry?.message?.usage ?? entry?.usage ?? null;
     if (usage && (usage.output_tokens ?? usage.outputTokens ?? 0) > 0) {
       hint = "claude";
-      out = {
-        outputTokens: usage.output_tokens ?? usage.outputTokens,
-        inputTokens: usage.input_tokens ?? usage.inputTokens ?? 0,
-        costUsd: entry?.costUSD ?? usage.cost_usd ?? usage.costUsd ?? 0,
-      };
+      acc("claude",
+        usage.output_tokens ?? usage.outputTokens,
+        usage.input_tokens ?? usage.inputTokens ?? 0,
+        entry?.costUSD ?? usage.cost_usd ?? usage.costUsd ?? 0);
     }
-    // Codex: {type:"token_count", info:{total_token_usage:{output_tokens,...}}}
-    const ttu = entry?.info?.total_token_usage;
-    if (entry?.type === "token_count" && ttu && (ttu.output_tokens ?? 0) > 0) {
-      hint = "codex";
-      out = {
-        outputTokens: ttu.output_tokens,
-        inputTokens: ttu.input_tokens ?? 0,
-        costUsd: ttu.cost_usd ?? ttu.costUsd ?? 0,
-      };
+    // Codex rollouts: {type:"event_msg", payload:{type:"token_count", info:{…}}}
+    // (older/simplified variants: {type:"token_count", info:{…}})
+    const cinfo = entry?.payload?.info ?? entry?.info ?? entry?.token_count?.info;
+    const isTokenCount =
+      entry?.type === "token_count" || entry?.payload?.type === "token_count" ||
+      (entry?.type === "event_msg" && entry?.payload?.type === "token_count");
+    if (cinfo && isTokenCount) {
+      const last = cinfo.last_token_usage; // per-turn delta — NOT cumulative
+      const total = cinfo.total_token_usage; // cumulative across the session
+      const src = last && (last.output_tokens ?? 0) > 0 ? last : total;
+      if (src && (src.output_tokens ?? 0) > 0) {
+        hint = "codex";
+        acc("codex", src.output_tokens, src.input_tokens ?? 0, src.cost_usd ?? src.costUsd ?? 0);
+      }
     }
-    // Codex newer: {type:"event_msg", ...} / generic token_count shapes
-    const tu2 = entry?.token_count?.info?.total_token_usage;
-    if (tu2 && (tu2.output_tokens ?? 0) > 0) {
-      out = { outputTokens: tu2.output_tokens, inputTokens: tu2.input_tokens ?? 0, costUsd: 0 };
-    }
-    // Grok Build / generic: usageMetadata (Gemini-style) or last model hint
+    // Grok Build / Gemini-style: usageMetadata.candidatesTokenCount
     const um = entry?.usageMetadata ?? entry?.response?.usageMetadata;
     if (um && (um.candidatesTokenCount ?? 0) > 0) {
-      out = {
-        outputTokens: um.candidatesTokenCount,
-        inputTokens: um.promptTokenCount ?? 0,
-        costUsd: 0,
-      };
+      hint = "grok";
+      acc("grok", um.candidatesTokenCount, um.promptTokenCount ?? 0, 0);
     }
     const m = entry?.message?.model ?? entry?.model;
     if (m) model = m;
   }
   if (!out && !model) return null;
-  return { ...out, model, hint };
+  return { ...out, model, hint, lastEntryTs };
 }
 
 // --- main -------------------------------------------------------------------
@@ -115,25 +145,26 @@ async function main() {
   const agent = detectAgent(process.env, input);
 
   if (event === "UserPromptSubmit" || event === "BeforeAgent" || event === "SessionStart") {
-    if (event !== "SessionStart" || !input.prompt) {
-      // SessionStart without a prompt is not a turn kickoff — skip, unless it
-      // carries BeforeAgent semantics (some agents blur these).
-      if (event === "SessionStart") return;
-    }
+    if (event === "SessionStart" && !input.prompt) return; // resume/compact, not a turn kickoff
     recordStart(sessionId, { agent, model: input.model || "" });
     return;
   }
 
   if (event === "Stop" || event === "AfterAgent" || event === "SessionEnd") {
+    // Mine first, claim second: a failed mine must not destroy the marker.
+    const mined = await mineTranscript(input.transcript_path);
+    if (!mined || !mined.outputTokens) return; // nothing countable
     const start = takeStart(sessionId);
     if (!start) return; // no matching turn start
-    const mined = mineTranscript(input.transcript_path);
-    const totalMs = Date.now() - start.t0;
-    if (!mined || !mined.outputTokens) return; // nothing countable
+
+    // Race guard: a marker older than the transcript's own last activity
+    // belongs to a superseded prompt, not this Stop.
+    if (mined.lastEntryTs && mined.lastEntryTs < start.t0) return;
+
     appendStat(
       computeStat({
         t0: start.t0,
-        totalMs,
+        totalMs: Date.now() - start.t0,
         outputTokens: mined.outputTokens,
         costUsd: mined.costUsd || 0,
         model: mined.model || start.model || "",

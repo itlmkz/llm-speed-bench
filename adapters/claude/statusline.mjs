@@ -2,25 +2,33 @@
 /**
  * statusline.mjs — Claude Code status line for llm-speed-bench.
  *
- * Configure in ~/.claude/settings.json:
+ * Configure in ~/.claude/settings.json (install.sh does this for you):
  *   { "statusLine": { "type": "command", "command": "node ~/.claude/llm-speed-bench/adapters/claude/statusline.mjs" } }
  *
  * Reads the session's last measured response from the shared stats store and
  * renders a one-line speed summary. Fails silently (prints the model) when
- * nothing is measured yet.
+ * nothing is measured yet. `node statusline.mjs table` prints the full table.
  */
 
-import { renderTable, readStats, fmtTps, fmtMs, fmtTokens, fmtCost } from "../../core/speed-core.mjs";
+let core;
+try {
+  core = await import("../../core/speed-core.mjs");
+} catch {
+  process.stdout.write("⚡ speed");
+  process.exit(0);
+}
+const { renderTable, readStats, fmtTps, fmtMs, fmtTokens, fmtCost } = core;
 
 async function main() {
   let input = {};
   try {
-    input = JSON.parse((await read(0)) || "{}");
+    input = JSON.parse((await readStdin()) || "{}");
   } catch {}
 
   const arg = process.argv[2];
   if (arg === "table") {
-    process.stdout.write(renderTable(readStats(400).filter((s) => !input.session_id || s.session === input.session_id)) + "\n");
+    const sid = input.session_id;
+    process.stdout.write(renderTable(readStats(400).filter((s) => !sid || s.session === sid)) + "\n");
     return;
   }
 
@@ -38,13 +46,28 @@ async function main() {
   );
 }
 
-function read(fd) {
+/** Drain stdin without crashing on EPIPE, truncating on slow writers, or hanging. */
+function readStdin() {
   return new Promise((resolve) => {
     let buf = "";
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      process.stdin.off("data", onData);
+      process.stdin.off("end", finish);
+      process.stdin.off("error", finish);
+      try { process.stdin.destroy(); } catch {}
+      resolve(buf);
+    };
+    const onData = (d) => (buf += d);
+    const timer = setTimeout(finish, 1500); // generous cap, not a truncation risk
+    timer.unref?.();
     process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (d) => (buf += d));
-    process.stdin.on("end", () => resolve(buf));
-    setTimeout(() => resolve(buf), 200).unref?.();
+    process.stdin.on("data", onData);
+    process.stdin.on("end", finish);
+    process.stdin.on("error", finish); // EPIPE no longer crashes
   });
 }
 

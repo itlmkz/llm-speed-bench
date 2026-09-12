@@ -33,7 +33,7 @@ node -e '
   fs.writeFileSync(f, s);
 ' "$DEST"
 
-if command -v "$BIN extensions link" >/dev/null 2>&1; then true; fi
+"$BIN" extensions link "$DEST" >/dev/null 2>&1 || true
 echo "  extension → $DEST"
-echo "  activate:  $BIN extensions link $DEST   (or restart $BIN — it auto-loads ~/.gemini/extensions)"
+echo "  activate:  $BIN extensions link \"$DEST\"   (or restart $BIN — it auto-loads $DIR/extensions)"
 echo "done. stats → ~/.cache/llm-speed-bench/stats.jsonl; in-session: /speed"
