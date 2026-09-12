@@ -1,0 +1,28 @@
+{
+  "BeforeModel": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "name": "llm-speed-bench-start",
+          "type": "command",
+          "command": "node \"${extensionPath}/speed-hook.mjs\"",
+          "timeout": 5000
+        }
+      ]
+    }
+  ],
+  "AfterModel": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "name": "llm-speed-bench-end",
+          "type": "command",
+          "command": "node \"${extensionPath}/speed-hook.mjs\"",
+          "timeout": 10000
+        }
+      ]
+    }
+  ]
+}

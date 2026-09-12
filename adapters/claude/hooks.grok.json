@@ -1,0 +1,29 @@
+{
+  "description": "llm-speed-bench: turn-level speed metrics",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.grok/llm-speed-bench/adapters/claude/speed-hook.mjs\" --agent grok",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.grok/llm-speed-bench/adapters/claude/speed-hook.mjs\" --agent grok",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

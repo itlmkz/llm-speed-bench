@@ -1,0 +1,6 @@
+{
+  "name": "llm-speed-bench",
+  "version": "0.2.0",
+  "description": "Live streaming-speed metrics for Gemini CLI: TTFT stopwatch, decode/overall tok/s, per-model medians.",
+  "contextFileName": "GEMINI.md"
+}

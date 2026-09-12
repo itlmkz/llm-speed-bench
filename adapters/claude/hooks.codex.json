@@ -1,0 +1,31 @@
+{
+  "description": "llm-speed-bench: turn-level speed metrics",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.codex/llm-speed-bench/adapters/claude/speed-hook.mjs\" --agent codex",
+            "async": true,
+            "timeout": 10,
+            "statusMessage": "speed: recording turn start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.codex/llm-speed-bench/adapters/claude/speed-hook.mjs\" --agent codex",
+            "async": true,
+            "timeout": 10,
+            "statusMessage": "speed: recording turn stats"
+          }
+        ]
+      }
+    ]
+  }
+}

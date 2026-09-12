@@ -1,0 +1,10 @@
+# /speed — show llm-speed-bench stats
+description = "Show streaming speed stats (TTFT / tok/s per model) recorded by the llm-speed-bench extension"
+
+Run this shell command and show its output verbatim as a code block, then summarize which model is fastest:
+
+```bash
+node "${extensionPath}/speed-hook.mjs" table
+```
+
+Do not modify any files.
