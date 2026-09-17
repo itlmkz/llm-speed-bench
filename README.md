@@ -37,6 +37,12 @@ One-liner — auto-detects every agent installed on this machine:
 curl -fsSL https://raw.githubusercontent.com/itlmkz/llm-speed-bench/main/install.sh | bash
 ```
 
+Pin a release instead of tracking `main` (see [releases](https://github.com/itlmkz/llm-speed-bench/releases)):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/itlmkz/llm-speed-bench/v0.2.0/install.sh | bash
+```
+
 Or from a clone:
 
 ```bash
