@@ -22,6 +22,7 @@ DEST="$DIR/extensions/llm-speed-bench"
 rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -R "$SRC/adapters/gemini/"* "$DEST/"
+rm -f "$DEST/install.sh"   # the installer itself is not part of the extension
 mkdir -p "$DEST/core"
 cp "$SRC/core/speed-core.mjs" "$DEST/core/"
 # re-point the hook's relative import: it now sits beside core/
