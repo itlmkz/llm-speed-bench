@@ -31,6 +31,14 @@ Why the difference? Agents that expose streaming events (pi, opencode-class) get
 
 **macOS / Linux** (bash + Node ≥ 18). Windows: use WSL.
 
+One-liner — auto-detects every agent installed on this machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/itlmkz/llm-speed-bench/main/install.sh | bash
+```
+
+Or from a clone:
+
 ```bash
 git clone https://github.com/itlmkz/llm-speed-bench.git
 cd llm-speed-bench

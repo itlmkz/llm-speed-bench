@@ -21,7 +21,7 @@ command -v "$BIN" >/dev/null 2>&1 || { echo "$BIN not found on PATH"; exit 1; }
 DEST="$DIR/extensions/llm-speed-bench"
 rm -rf "$DEST"
 mkdir -p "$DEST"
-cp "$SRC/adapters/gemini/"* "$DEST/"
+cp -R "$SRC/adapters/gemini/"* "$DEST/"
 mkdir -p "$DEST/core"
 cp "$SRC/core/speed-core.mjs" "$DEST/core/"
 # re-point the hook's relative import: it now sits beside core/
@@ -33,7 +33,15 @@ node -e '
   fs.writeFileSync(f, s);
 ' "$DEST"
 
-"$BIN" extensions link "$DEST" >/dev/null 2>&1 || true
-echo "  extension → $DEST"
-echo "  activate:  $BIN extensions link \"$DEST\"   (or restart $BIN — it auto-loads $DIR/extensions)"
+"$BIN" --version >/dev/null 2>&1 || true
+
+# No `extensions link` call: Gemini auto-discovers every directory under
+# $DIR/extensions/ at startup (reported "Enabled (User): true", no registration
+# file needed), so the copy above is the whole install. We deliberately do not
+# invoke `link` — it is interactive, and with stdout/stderr redirected (as in a
+# script) its "workspace is not trusted / continue? [Y/n]" prompt blocks forever
+# on a stdin read the user cannot even see. Verified hang-proof and functional
+# in a clean HOME.
+echo "  extension → $DEST  (auto-discovered; no link step needed)"
+echo "  activate:  restart $BIN — it loads $DIR/extensions at startup"
 echo "done. stats → ~/.cache/llm-speed-bench/stats.jsonl; in-session: /speed"

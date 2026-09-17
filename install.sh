@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # llm-speed-bench — install the speed counter into every agent found on this machine.
+#
+# From a clone:      ./install.sh
+# One-liner (anywhere): curl -fsSL https://raw.githubusercontent.com/itlmkz/llm-speed-bench/main/install.sh | bash
 set -euo pipefail
+
+# When piped from curl there is no local checkout — fetch the repo and re-exec.
+if [ "${0##*/}" = "bash" ] || [ "${0##*/}" = "sh" ]; then
+  tmp="$(mktemp -d)"
+  curl -fsSL https://github.com/itlmkz/llm-speed-bench/archive/refs/heads/main.tar.gz \
+    | tar -xz -C "$tmp" --strip-components=1
+  exec bash "$tmp/install.sh" "$@"
+fi
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 echo "llm-speed-bench installer — detecting agents…"

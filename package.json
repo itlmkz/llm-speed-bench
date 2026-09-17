@@ -1,7 +1,7 @@
 {
-  "name": "pi-llm-speed-test-extension",
-  "version": "0.1.0",
-  "description": "Live streaming-speed readout for pi: TTFT stopwatch, per-model tok/s medians, a speedometer footer that reacts to how fast your model is actually generating.",
+  "name": "llm-speed-bench",
+  "version": "0.2.0",
+  "description": "Live streaming-speed benchmark for every AI coding agent: TTFT stopwatch, per-model tok/s medians, and cost — for pi, Claude Code, Codex, Grok Build, Gemini CLI, Qwen Code, opencode, and MiMo Code.",
   "license": "MIT",
   "keywords": [
     "pi",
